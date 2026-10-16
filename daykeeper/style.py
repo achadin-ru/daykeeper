@@ -32,6 +32,7 @@ from .palette import (
     RAIL_ACTIVE,
     RAIL_HOVER,
     ON_ACCENT,
+    ON_RAIL,
     RAIL_TEXT,
     RAISED,
     RAISED_HOVER,
@@ -188,20 +189,20 @@ def install(root: tk.Tk) -> theme.Painter:
     # the dark tab bar on top
     rounded("Nav.TButton", 9, none, (RAIL_HOVER, None), (RAIL_HOVER, None))
     style.configure("Nav.TButton", foreground=RAIL_TEXT, anchor="center", padding=(10, 7), font=(FONT, pt(11)), background=RAIL)
-    style.map("Nav.TButton", foreground=[("active", ON_ACCENT)])
+    style.map("Nav.TButton", foreground=[("active", ON_RAIL)])
     rounded("NavActive.TButton", 9, (RAIL_ACTIVE, None), (RAIL_ACTIVE, None), (RAIL_ACTIVE, None))
     style.configure("NavActive.TButton", foreground=ON_ACCENT, anchor="center", padding=(10, 7), font=(FONT, pt(11), "bold"), background=RAIL)
     rounded("NavIcon.TButton", 9, none, (RAIL_HOVER, None), (RAIL_HOVER, None), none)  # disabled (undo with nothing to undo): just dimmer
     # macOS has no ⚙ ↶ ↷ ⏻ in its UI font and draws them small from a fallback one
     icon_size = 16 if sys.platform == "darwin" else 12
     style.configure("NavIcon.TButton", foreground=RAIL_TEXT, padding=(9, 7), width=2, font=(FONT, pt(icon_size)), background=RAIL)
-    style.map("NavIcon.TButton", foreground=[("disabled", RAIL_HOVER), ("active", ON_ACCENT)], background=[("disabled", RAIL)])
+    style.map("NavIcon.TButton", foreground=[("disabled", RAIL_HOVER), ("active", ON_RAIL)], background=[("disabled", RAIL)])
 
     rounded("Toggle.Toolbutton", 7, none, (HOVER, None), (PRESSED, None))
     style.configure("Toggle.Toolbutton", padding=(8, 5), background=CARD)
     p.element(style, p.el("Toggle.sel"), 7, [("selected", p.box(7, ACCENT_SOFT)), ("active", p.box(7, HOVER))], p.box(7, None))
     style.layout("Toggle.Toolbutton", [(p.el("Toggle.sel"), {"sticky": "nswe", "children": [("Toolbutton.padding", {"sticky": "nswe", "children": [("Toolbutton.label", {"sticky": "nswe"})]})]})])
-    style.map("Toggle.Toolbutton", foreground=[("selected", ACCENT)])
+    style.map("Toggle.Toolbutton", foreground=[("selected", LINK)])
 
     style.configure(
         "Treeview",

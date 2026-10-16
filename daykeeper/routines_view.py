@@ -34,7 +34,7 @@ from .widgets import TileGrid, Tooltip, make_fonts, divider
 
 SCHEDULE_TICK_MS = 20_000
 KIND_LABELS = {"script": "Script", "command": "Command", "url": "Link", "folder": "Folder", "file": "File"}
-KIND_COLOURS = {"script": "#2563EB", "command": "#4B5563", "url": "#0D9488", "folder": "#CA8A04", "file": "#7C3AED"}
+KIND_COLOURS = {"script": palette.LINK, "command": "#4B5563", "url": "#0D9488", "folder": "#16A34A", "file": "#7C3AED"}
 
 
 class OutputWindow(tk.Toplevel):
@@ -358,7 +358,7 @@ class RoutinesPage(TabPage):
         """What the tile says about the run: (text, colour, running now, a run to show)."""
         run = self.app.runs.latest(r)
         if run is not None and run.running:
-            return "⏳ " + _("running… {s} s").format(s=int(run.duration())), palette.ACCENT, True, True
+            return "⏳ " + _("running… {s} s").format(s=int(run.duration())), palette.LINK, True, True
         if run is not None:
             ok = run.code == 0
             when = time.strftime("%d.%m %H:%M", time.localtime(run.started))  # when it ran, not only how long

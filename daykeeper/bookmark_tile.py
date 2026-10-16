@@ -183,7 +183,7 @@ class BookmarkTile(tk.Canvas):
         self.delete("all")
         self._shown = []
         colour = bm.colour()
-        border, bw = (colour, 1.5) if self.hot else (palette.BORDER, 1.0)
+        border, bw = (palette.ACCENT, 1.5) if self.hot else (palette.BORDER, 1.0)  # the site's colour stays on its avatar
         scale = self.app.painter.scale
         self.create_image(0, 0, anchor="nw", tags=("open", "bg"),
                           image=_box(self, w, h, RADIUS * scale, TILE_BG, border, bw * scale, palette.CARD))
@@ -199,7 +199,7 @@ class BookmarkTile(tk.Canvas):
         room = right - more_w - tx
         th, hh = f["title"].metrics("linespace"), f["host"].metrics("linespace")
         ty = y0 + (size - th - hh - self.px(TITLE_GAP)) // 2
-        self.create_text(tx, ty, anchor="nw", tags=("open", "title"), font=f["title"], fill=colour if self.hot else palette.TEXT,
+        self.create_text(tx, ty, anchor="nw", tags=("open", "title"), font=f["title"], fill=palette.LINK if self.hot else palette.TEXT,
                          text=fit_text(bm.title or bm.host or _("(untitled)"), f["title"], room))
         self.create_text(tx, ty + th + self.px(TITLE_GAP), anchor="nw", tags=("open",), font=f["host"], fill=palette.MUTED,
                          text=fit_text(bm.host or _("no address"), f["host"], right - tx))
@@ -215,7 +215,7 @@ class BookmarkTile(tk.Canvas):
             both = ""
             if has_secret(self.entry):
                 both = "↗ + 🔑"
-                self.create_text(right - px(36), mid, anchor="e", text=both, font=f["button"], fill=palette.ACCENT, tags=("both",))
+                self.create_text(right - px(36), mid, anchor="e", text=both, font=f["button"], fill=palette.LINK, tags=("both",))
             room = right - x0 - (measure(f["button"], both) + px(48) if both else 0)
             self.create_text(x0, mid, anchor="w", text=fit_text("🔗 " + self.entry.name, f["host"], room), font=f["host"], fill=palette.MUTED, tags=("link",))
 

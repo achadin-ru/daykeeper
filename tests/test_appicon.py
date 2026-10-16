@@ -48,6 +48,20 @@ class WindowIconTest(unittest.TestCase):
         finally:
             root.destroy()
 
+    def test_the_logo_is_the_icon_at_the_nearest_size(self) -> None:
+        """A 64 px canvas at 125 % asks for 80; a 30 px one at 150 % for 45."""
+        root = tk.Tk()
+        try:
+            root.withdraw()
+            self.assertEqual(appicon.logo_sizes(), [30, 38, 45, 53, 60, 64, 80, 96, 112, 128])
+            self.assertEqual(appicon.logo(root, 80).width(), 80)
+            self.assertEqual(appicon.logo(root, 46).width(), 45)
+            self.assertIs(appicon.logo(root, 80), appicon.logo(root, 81), "one image per size, kept on the window")
+            with mock.patch.object(appicon, "logo_sizes", return_value=[]):
+                self.assertIsNone(appicon.logo(root, 64))
+        finally:
+            root.destroy()
+
     def test_without_the_file_the_window_opens_all_the_same(self) -> None:
         root = tk.Tk()
         try:

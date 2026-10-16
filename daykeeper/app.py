@@ -279,7 +279,7 @@ class App(tk.Tk):
         args = autostart.launch_args(False)[:1 if getattr(sys, "frozen", False) else 2] + sys.argv[1:]
         self._on_close()
         try:
-            subprocess.Popen(args)  # noqa: S603 — this very app
+            subprocess.Popen(args, env=restart_env(os.environ))  # noqa: S603 — this very app
         except OSError:
             pass
 
@@ -450,8 +450,12 @@ class App(tk.Tk):
         exists = self.vault_path.exists()
         px = self.painter.px
         logo = tk.Canvas(box, width=px(64), height=px(64), bg=CARD, highlightthickness=0)
-        logo.create_image(px(32), px(32), image=self.painter.image(64, 64, 18, fill=ACCENT))
-        logo.create_text(px(32), px(33), text="🗝", font=(FONT, pt(24)), fill=palette.ON_ACCENT)
+        picture = appicon.logo(self, px(64))  # the app icon itself; drawn when the file is missing
+        if picture is not None:
+            logo.create_image(px(32), px(32), image=picture)
+        else:
+            logo.create_image(px(32), px(32), image=self.painter.image(64, 64, 18, fill=ACCENT))
+            logo.create_text(px(32), px(32), text="D", font=(FONT, pt(30), "bold"), fill=palette.ON_ACCENT)
         logo.grid(row=0, column=0, pady=(0, 12))
         head = ttk.Frame(box, style="Card.TFrame")
         head.grid(row=1, column=0)
@@ -605,8 +609,12 @@ class App(tk.Tk):
         bar.pack(side="top", fill="x")
         px = self.painter.px
         mark = tk.Canvas(bar, width=px(30), height=px(30), bg=RAIL, highlightthickness=0)
-        mark.create_image(px(15), px(15), image=self.painter.image(30, 30, 9, fill=ACCENT))
-        mark.create_text(px(15), px(16), text="🗝", font=(FONT, pt(12)), fill=palette.ON_ACCENT)
+        picture = appicon.logo(self, px(30))
+        if picture is not None:
+            mark.create_image(px(15), px(15), image=picture)
+        else:
+            mark.create_image(px(15), px(15), image=self.painter.image(30, 30, 9, fill=ACCENT))
+            mark.create_text(px(15), px(15), text="D", font=(FONT, pt(13), "bold"), fill=palette.ON_ACCENT)
         mark.pack(side="left", padx=(0, 8))
         # next to the logo, where the hand starts: settings, lock the app, lock the passwords.
         # Everything the old app menu held has its place in a tab or in Settings
@@ -1136,6 +1144,17 @@ def main() -> None:
     # and everything is saved, so the process does not wait for them
     if any(t.is_alive() and not t.daemon for t in threading.enumerate() if t is not threading.main_thread()):
         os._exit(0)
+
+
+def restart_env(env) -> dict[str, str]:
+    """The environment of the restarted copy. A one-file build unpacks itself into a temp
+    folder and tells its own Python where through `_PYI_*` variables; a copy started with
+    them inherited would run from this process's folder — removed as this process exits,
+    so the new window failed half-way (seen after a theme switch). The reset flag makes the
+    new copy unpack itself as a fresh start does."""
+    fresh = {k: v for k, v in env.items() if not k.startswith("_PYI_")}
+    fresh["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return fresh
 
 
 def _refresh_autostart(app: App) -> None:

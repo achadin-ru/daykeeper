@@ -725,7 +725,31 @@ class ContrastTest(unittest.TestCase):
             pairs = [("TEXT", "CARD"), ("TEXT", "BG"), ("MUTED", "CARD"), ("MUTED", "BG"), ("DISABLED_TEXT", "WHITE"), ("LINK", "CARD"), ("SUCCESS", "CARD"), ("DANGER", "CARD"), ("RAIL_TEXT", "RAIL")]
             for fg, bg in pairs:
                 self.assertGreaterEqual(self._ratio(c[fg], c[bg]), 4.5, f"{name}: {fg} on {bg}")
-            self.assertGreaterEqual(self._ratio("#FFFFFF", c["RAIL_ACTIVE"]), 4.5, f"{name}: white on the active tab")
+            self.assertGreaterEqual(self._ratio(P.ON_ACCENT, c["RAIL_ACTIVE"]), 4.5, f"{name}: the text on the active tab")
+            self.assertGreaterEqual(self._ratio(P.ON_ACCENT, c["ACCENT"]), 4.5, f"{name}: the text on a primary button")
+            self.assertGreaterEqual(self._ratio(P.ON_RAIL, c["RAIL_HOVER"]), 4.5, f"{name}: a rail tab under the pointer")
+            self.assertGreaterEqual(self._ratio(c["ACCENT_INK"], c["ACCENT_SOFT"]), 4.5, f"{name}: text on a soft accent fill")
+
+
+class RestartEnvironmentTest(unittest.TestCase):
+    def test_the_restarted_copy_unpacks_itself_afresh(self):
+        """A one-file build restarted with the parent's _PYI_* variables ran from the parent's
+        temp folder, removed as the parent exited: the theme switch ended in an error."""
+        from daykeeper.app import restart_env
+
+        env = restart_env({"PATH": "x", "_PYI_APPLICATION_HOME_DIR": "C:/t/_MEI1", "_PYI_ARCHIVE_FILE": "D.exe", "_PYI_PARENT_PROCESS_LEVEL": "1"})
+        self.assertEqual(env, {"PATH": "x", "PYINSTALLER_RESET_ENVIRONMENT": "1"})
+
+
+class AccentEverywhereTest(unittest.TestCase):
+    def test_the_plain_note_and_the_script_tile_take_the_app_accent(self):
+        from daykeeper import palette
+        from daykeeper.notes import COLOR_ACCENT
+        from daykeeper.routines_view import KIND_COLOURS
+
+        self.assertEqual(COLOR_ACCENT[""], palette.LINK)
+        self.assertEqual(KIND_COLOURS["script"], palette.LINK)
+        self.assertEqual(len(set(KIND_COLOURS.values())), len(KIND_COLOURS), "every kind keeps its own colour")
 
 
 class RussianCatalogTest(unittest.TestCase):

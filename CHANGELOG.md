@@ -5,10 +5,21 @@
 Every finding of `AUDIT_REPORT.md` (section 9 there lists each with its test and probe).
 
 **Look**
+- The restart after a theme switch failed in the one-file Windows build: the new copy
+  inherited the old one's `_PYI_*` variables and ran from its temp folder, which the old
+  copy could then not remove ("Failed to remove temporary directory"). The restart now
+  starts a fresh copy (`PYINSTALLER_RESET_ENVIRONMENT`).
+- A plain note, a script routine and the border and title of a tile under the pointer take
+  the app's accent; they were still blue.
 - The app has an icon: an amber tile with the ink letter D and a small key in its counter.
   It is the file icon of the Windows exe and the macOS bundle and the icon of every window
   (before, the exe showed the PyInstaller default and the windows Tk's feather). The
   picture is drawn by `tools/make_icon.py` into `assets/`.
+- The colours follow the icon: the accent is amber with ink text on it (buttons, the active
+  tab, checks) in both themes, and the logo on the unlock screen and in the tab bar is the
+  icon itself (`assets/logo/`, one file per size the window shows it at); link-like text is a
+  darker amber that keeps 4.5:1 on a card. Text is never drawn in the accent itself any more
+  (it was in three places), and a rail tab under the pointer stays white.
 
 **Security**
 - The PIN / master-password guard over the Passwords tab was only a picture: `Ctrl+F`,

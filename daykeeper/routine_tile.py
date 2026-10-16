@@ -160,7 +160,7 @@ class RoutineTile(tk.Canvas):
             return
         self.delete("all")
         self._shown = []
-        border, bw = (self.colour, 1.5) if self.hot else (palette.BORDER, 1.0)
+        border, bw = (palette.ACCENT, 1.5) if self.hot else (palette.BORDER, 1.0)  # under the pointer: the app's accent, as every tile
         self.create_image(0, 0, anchor="nw", tags=("bg",), image=rounded_box(self, w, h, RADIUS * scale, palette.TILE, border, bw * scale, palette.CARD))
         self.create_image(x0, y0, anchor="nw", tags=("badge",), image=rounded_box(self, size, size, BADGE_RADIUS * scale, blend(self.colour, palette.TILE, 0.14), None, 1.0, palette.TILE))
         self.create_text(x0 + size // 2, y0 + size // 2, text=r.avatar(), fill=self.colour, font=f["avatar"], tags=("badge",))
@@ -168,7 +168,7 @@ class RoutineTile(tk.Canvas):
         th = self._line("title")
         y = y0
         for line in lines:
-            self.create_text(tx, y, anchor="nw", text=line, font=f["title"], fill=self.colour if self.hot else palette.TEXT, tags=("title",))
+            self.create_text(tx, y, anchor="nw", text=line, font=f["title"], fill=palette.LINK if self.hot else palette.TEXT, tags=("title",))
             y += th
         self.create_text(tx, y + px(2), anchor="nw", text=fit_text(f"{self.page.kind_label(r)} · {subtitle(r)}", f["small"], right - tx), font=f["small"], fill=palette.MUTED, tags=("sub",))
         y = y0 + max(size, len(lines) * th + px(2) + self._line("small"))

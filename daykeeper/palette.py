@@ -30,7 +30,8 @@ def pt(size: float) -> int:
     return round(size * SIZE_SCALE)
 
 WHITE = "#FFFFFF"  # the light surface: fields, menus, tool tips' text; not white in the dark theme
-ON_ACCENT = "#FFFFFF"  # text and ticks on an accent fill, in both themes
+ON_ACCENT = "#111827"  # text and ticks on an accent fill, in both themes: ink on amber, as on the icon
+ON_RAIL = "#FFFFFF"  # text on the dark rail under the pointer, in both themes
 BG = "#F3F4F8"  # window and unlock screen background
 SIDEBAR = "#F7F8FB"  # left column with the list
 CARD = "#FFFFFF"  # entry card
@@ -39,13 +40,13 @@ BORDER = "#E3E6ED"
 TEXT = "#111827"
 MUTED = "#667085"  # 4.7:1 on the window background (#6B7280 was 4.4:1)
 DISABLED_TEXT = "#6E7684"  # a greyed-out menu item (4.5:1 on white; #B8BDC7 was 1.9:1)
-ACCENT = "#4F46E5"
-LINK = "#4F46E5"  # link-like text on a card; lighter than the accent in the dark theme, where the accent fill is too dim for text
-ACCENT_HOVER = "#4338CA"
-ACCENT_PRESSED = "#3730A3"
-ACCENT_DISABLED = "#A5B4FC"
-ACCENT_SOFT = "#EEF0FF"
-ACCENT_INK = "#3730A3"  # text on a soft accent background
+ACCENT = "#F59E0B"  # amber, the colour of the icon; never text — too light on white (LINK and ACCENT_INK are)
+LINK = "#B45309"  # link-like text on a card: a darker amber, 5:1 on white; lighter in the dark theme
+ACCENT_HOVER = "#D97706"
+ACCENT_PRESSED = "#B45309"
+ACCENT_DISABLED = "#FDE68A"
+ACCENT_SOFT = "#FEF3C7"
+ACCENT_INK = "#92400E"  # text on a soft accent background
 DANGER = "#DC2626"
 DANGER_SOFT = "#FEE2E2"  # a danger button under the pointer
 DANGER_PRESSED = "#FECACA"
@@ -57,7 +58,7 @@ SCROLL = "#D3D8E1"
 SCROLL_HOVER = "#A3ABB9"
 RAIL = "#111827"  # the navigation rail on the left
 RAIL_HOVER = "#1F2937"
-RAIL_ACTIVE = "#4F46E5"
+RAIL_ACTIVE = "#F59E0B"  # the active tab: the amber pill with ink text
 RAIL_TEXT = "#9CA3AF"
 CRED_BG = "#F6F7F9"  # the login and password rows on a bookmark tile
 CONSOLE_BG = "#0F172A"  # the output window of a routine
@@ -84,13 +85,13 @@ DARK = {
     "TEXT": "#E7E9EE",
     "MUTED": "#9AA3B2",
     "DISABLED_TEXT": "#8E97A7",
-    "ACCENT": "#6366F1",
-    "LINK": "#818CF8",
-    "ACCENT_HOVER": "#7477F4",
-    "ACCENT_PRESSED": "#4F46E5",
-    "ACCENT_DISABLED": "#3E4180",
-    "ACCENT_SOFT": "#2B2E55",
-    "ACCENT_INK": "#C7CAFE",
+    "ACCENT": "#F59E0B",
+    "LINK": "#FBBF24",
+    "ACCENT_HOVER": "#FBBF24",
+    "ACCENT_PRESSED": "#D97706",
+    "ACCENT_DISABLED": "#6B5313",
+    "ACCENT_SOFT": "#3A2E12",
+    "ACCENT_INK": "#FCD34D",
     "DANGER": "#F87171",
     "DANGER_SOFT": "#3D2226",
     "DANGER_PRESSED": "#4C262B",
@@ -102,7 +103,7 @@ DARK = {
     "SCROLL_HOVER": "#596273",
     "RAIL": "#0E1014",
     "RAIL_HOVER": "#20242B",
-    "RAIL_ACTIVE": "#5457E5",
+    "RAIL_ACTIVE": "#F59E0B",
     "RAIL_TEXT": "#9CA3AF",
     "CRED_BG": "#2A2F38",
     "CONSOLE_BG": "#0B0E14",

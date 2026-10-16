@@ -19,7 +19,7 @@ from .journal import today
 # Card colours: (code, UI label key, background, accent). The code is stored in the note;
 # the accent colours the stripe on the left edge of the card and its progress bar.
 NOTE_COLORS: list[tuple[str, str, str, str]] = [
-    ("", "White", "#FFFFFF", "#2563EB"),
+    ("", "White", "#FFFFFF", palette.LINK),  # a plain card takes the app's accent (it is text too: "+", "to today")
     ("yellow", "Yellow", "#FFF7C2", "#CA8A04"),
     ("orange", "Orange", "#FFEDD5", "#EA580C"),
     ("green", "Green", "#E3F6E4", "#16A34A"),

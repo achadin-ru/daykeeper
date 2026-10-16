@@ -20,6 +20,9 @@ S = 1024  # the drawing size; every coordinate below is in these units
 AMBER_TOP, AMBER_BOTTOM, INK = (0xFC, 0xD3, 0x4D), (0xF5, 0x9E, 0x0B), (0x11, 0x18, 0x27)
 KEY_FRACTION = 0.66  # the key's height as a share of the counter's
 ICO_SIZES = [(16, 16), (20, 20), (24, 24), (32, 32), (40, 40), (48, 48), (64, 64), (128, 128), (256, 256)]
+# the logo inside the window (the unlock screen's 64 px, the rail's 30 px) at the usual
+# monitor scales 100–200 %; Tk scales only by whole factors, so each size is a file
+LOGO_SIZES = (30, 38, 45, 53, 60, 64, 80, 96, 112, 128)
 
 
 def _layer() -> tuple[Image.Image, ImageDraw.ImageDraw]:
@@ -104,7 +107,14 @@ def write(img: Image.Image) -> list[Path]:
     img.resize((256, 256), Image.LANCZOS).save(png)  # the window icon: small to load at start
     img.save(ico, sizes=ICO_SIZES)
     img.save(icns)
-    return [png, ico, icns]
+    logos = ASSETS / "logo"
+    logos.mkdir(exist_ok=True)
+    out = [png, ico, icns]
+    for size in LOGO_SIZES:
+        path = logos / f"{size}.png"
+        img.resize((size, size), Image.LANCZOS).save(path)
+        out.append(path)
+    return out
 
 
 def main() -> None:

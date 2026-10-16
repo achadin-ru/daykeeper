@@ -9,6 +9,7 @@ from pathlib import Path
 
 ASSETS_FOLDER = "assets"
 ICON_PNG = "icon.png"
+LOGO_FOLDER = "logo"  # the same picture at the sizes the window shows it (tools/make_icon.py)
 
 
 def asset(name: str) -> Path | None:
@@ -16,7 +17,7 @@ def asset(name: str) -> Path | None:
     base = getattr(sys, "_MEIPASS", None)
     root = Path(base) if base else Path(__file__).resolve().parents[1]
     path = root / ASSETS_FOLDER / name
-    return path if path.is_file() else None
+    return path if path.exists() else None
 
 
 def apply(window: tk.Tk) -> bool:
@@ -33,3 +34,30 @@ def apply(window: tk.Tk) -> bool:
         return False
     window._icon_images = (big, small)  # type: ignore[attr-defined]
     return True
+
+
+def logo_sizes() -> list[int]:
+    folder = asset(LOGO_FOLDER)
+    if folder is None:
+        return []
+    return sorted(int(p.stem) for p in folder.glob("*.png") if p.stem.isdigit())
+
+
+def logo(window: tk.Misc, size: int) -> tk.PhotoImage | None:
+    """The icon as the window's logo, the file nearest to `size` pixels (a 64 px canvas at
+    125 % wants 80). None without the files. Kept on the window, like the icon."""
+    sizes = logo_sizes()
+    if not sizes:
+        return None
+    best = min(sizes, key=lambda s: (abs(s - size), s))
+    cache: dict[int, tk.PhotoImage] = getattr(window, "_logo_images", None) or {}
+    if best not in cache:
+        folder = asset(LOGO_FOLDER)
+        if folder is None:
+            return None
+        try:
+            cache[best] = tk.PhotoImage(master=window, file=str(folder / f"{best}.png"))
+        except tk.TclError:
+            return None
+        window._logo_images = cache  # type: ignore[attr-defined]
+    return cache[best]

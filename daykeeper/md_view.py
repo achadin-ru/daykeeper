@@ -147,7 +147,7 @@ class FileViewer(tk.Toplevel):
         t.tag_configure("table", font=f["code"], lmargin1=8, lmargin2=8, spacing1=0, spacing3=0)
         t.tag_configure("table_head", font=f["code_bold"])
         t.tag_configure("rule", foreground=palette.BORDER, justify="center")
-        t.tag_configure("box", font=f["box"], foreground=palette.ACCENT)
+        t.tag_configure("box", font=f["box"], foreground=palette.LINK)
         t.tag_configure("done", overstrike=True, foreground=palette.MUTED)
         t.tag_bind("box", "<Enter>", lambda _e: t.config(cursor="hand2"))
         t.tag_bind("box", "<Leave>", lambda _e: t.config(cursor="arrow"))
