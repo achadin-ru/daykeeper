@@ -234,8 +234,8 @@ def preset(pid: str) -> Layout:
             Column("blockers", "What is in the way", command="blocker"),
         ], [_note()], show_other=False)
     return Layout("qa", [
-        Column("ok", "Tested successfully", command="pass", phrase="RFT", button="✓ Passed"),
-        Column("failed", "Test failed", command="fail", phrase="RFT", button="✗ Failed"),
+        Column("ok", "Tested successfully", command="pass", phrase="tested tasks", button="✓ Passed"),
+        Column("failed", "Test failed", command="fail", phrase="tested tasks", button="✗ Failed"),
         Column("bugs", "New bug", command="bug", phrase="bugs filed", phrase_alone=True, button="🐞 Bug"),
     ], [
         Kind("review", "MR reviews", command="review", phrase="reviewed MRs", role=ROLE_MR),

@@ -15,6 +15,12 @@ class Toast(tk.Toplevel):
     """A card with a title and a text; a click opens the link or runs `action`."""
 
     stack: list[Toast] = []
+    closes_on_lock = True  # App.close_child_windows: an MR title or a run's result must not outlive the lock
+
+    def on_lock(self) -> None:
+        if self in Toast.stack:
+            Toast.stack.remove(self)
+        self.after_cancel(self._close_job)  # the window goes now; its timer must not fire on a dead window
 
     def __init__(self, master: tk.Misc, title: str, text: str, url: str = "", action=None):
         super().__init__(master)
@@ -31,7 +37,7 @@ class Toast(tk.Toplevel):
         Toast.stack.append(self)
         self.update_idletasks()
         self._place()
-        self.after(TOAST_MS, self._close)
+        self._close_job = self.after(TOAST_MS, self._close)
 
     def _place(self) -> None:
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()

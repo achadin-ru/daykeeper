@@ -21,28 +21,20 @@ from tkinter import filedialog, ttk
 from . import palette
 from .dialogs import Dialog, ask_yes_no, show_warning
 from .i18n import _
-from .theme import RoundCard
 from .popup import Dropdown, PopupMenu
+from .routine_tile import RoutineTile
 from .md_view import open_with_system, show_in_folder
-from .routines import KINDS, RUN_LOG_KEEP, WEEKDAYS, Routine, Schedule, describe_schedule, launch_plan, now_local, subtitle
+from .routines import KINDS, RUN_LOG_KEEP, SCRIPT_CHANGED, SCRIPT_UNKNOWN, WEEKDAYS, Routine, Schedule, accept_script, check_script, launch_plan, now_local, risky_location
 from .runner import Run, open_in_console
 from .sidebar import SidebarKeeper
 from .tabpage import Shell, TabPage, make_scrollable
 from .timers import Ticker
 from .toast import Toast
-from .widgets import TileGrid, Tooltip, chip, make_fonts, divider
+from .widgets import TileGrid, Tooltip, make_fonts, divider
 
 SCHEDULE_TICK_MS = 20_000
 KIND_LABELS = {"script": "Script", "command": "Command", "url": "Link", "folder": "Folder", "file": "File"}
 KIND_COLOURS = {"script": "#2563EB", "command": "#4B5563", "url": "#0D9488", "folder": "#CA8A04", "file": "#7C3AED"}
-
-
-class _MenuAt:
-    """Where a menu opened from the keyboard appears: under the top of the tile."""
-
-    def __init__(self, tile: tk.Widget):
-        self.x_root = tile.winfo_rootx() + tile.winfo_width() // 2
-        self.y_root = tile.winfo_rooty() + 40
 
 
 class OutputWindow(tk.Toplevel):
@@ -115,8 +107,9 @@ class RoutineRuns:
         self.app = app
         self.runs: list[Run] = []
         self._run_windows: dict[int, OutputWindow] = {}
-        Ticker(app, SCHEDULE_TICK_MS, self._routine_tick).start()
-        Ticker(app, 300, self._pump_runs).start()
+        self.tickers = (Ticker(app, SCHEDULE_TICK_MS, self._routine_tick), Ticker(app, 300, self._pump_runs))
+        for ticker in self.tickers:
+            ticker.start()
 
     @property
     def page(self) -> RoutinesPage | None:
@@ -133,7 +126,11 @@ class RoutineRuns:
             page.refresh_routine_sidebar()
 
     def run_routine(self, r: Routine, auto: bool = False) -> None:
-        """Start a routine. auto — started by the schedule: quiet, only a failure pops up."""
+        """Start a routine. auto — started by the schedule: quiet, only a failure pops up,
+        and only the script the user accepted runs (check_script); a changed or never
+        accepted script waits for a run by hand, which is the acceptance."""
+        if not self._script_accepted(r, auto):
+            return
         plan = launch_plan(r)
         if plan.problem:
             if plan.problem == "empty":
@@ -166,6 +163,29 @@ class RoutineRuns:
         self.app.set_status(_("Started: {name}").format(name=r.name))
         self._page_update_tile(r)
         self._page_refresh_sidebar()
+
+    def _script_accepted(self, r: Routine, auto: bool) -> bool:
+        state = check_script(r)
+        if state in ("", SCRIPT_UNKNOWN) and not auto:
+            accept_script(r)  # a run by hand is the consent to this version of the file
+            return True
+        if not state:
+            return True
+        if auto:
+            if state == SCRIPT_CHANGED:
+                Toast(self.app, f"⚡ {r.name}", _("Did not start: the script changed since you last ran it. Run it by hand once to accept the new version."))
+            elif state == SCRIPT_UNKNOWN:
+                Toast(self.app, f"⚡ {r.name}", _("Did not start by itself: run it by hand once to accept the script."))
+            else:
+                Toast(self.app, f"⚡ {r.name}", _("Not found: {path}").format(path=r.target))
+            self.app.set_status(_("Not started: {name}").format(name=r.name))
+            return False
+        if state == SCRIPT_CHANGED:
+            if not ask_yes_no(self.app, _("“{name}”: the script file changed since you last ran it.\n\nRun this version? It becomes the accepted one and will start by itself again.").format(name=r.name)):
+                return False
+            accept_script(r)
+            self.app.mark_dirty(None)
+        return True  # unreadable: launch_plan says "not found"
 
     def _run_in_console(self, r: Routine, plan) -> None:
         """A separate console window that stays open after the script ends; without a
@@ -245,7 +265,7 @@ class RoutinesPage(TabPage):
     name = "routines"
 
     def __init__(self, app: Shell, parent: tk.Misc):
-        self._rtile_parts: dict[str, dict] = {}  # routine id → the widgets of its tile a run updates
+        self._rtiles_by_id: dict[str, RoutineTile] = {}  # routine id → its tile, redrawn when a run begins or ends
         self._rtiles: list[tk.Widget] = []
         super().__init__(app, parent)
 
@@ -287,7 +307,7 @@ class RoutinesPage(TabPage):
         SidebarKeeper(paned, minimum=self.app.painter.px(240), width=self.app.painter.px(330))
         self.rcanvas, _vsb, self.rgrid = make_scrollable(self.app, host, (24, 20, 24, 20))
         self._rtile_grid = TileGrid(self.rgrid)  # the heading, the hint and the tiles in the columns the width allows
-        self._rfonts = make_fonts({"title": (12, "bold"), "small": (9,), "row": (10,), "avatar": (16,), "head": (17, "bold")})
+        self._rfonts = make_fonts({"title": (12, "bold"), "small": (9,), "row": (10, "bold"), "avatar": (16,), "head": (17, "bold")})
 
     def _refresh_routines(self, keep_scroll: bool = False) -> None:
         if self.vault is None:
@@ -295,7 +315,7 @@ class RoutinesPage(TabPage):
         top = self.rcanvas.yview()[0]
         for child in self.rgrid.winfo_children():
             child.destroy()
-        self._rtile_parts.clear()
+        self._rtiles_by_id.clear()
         items = self.vault.routines.ordered()
         head = tk.Label(self.rgrid, text=_("Daily routine"), bg=palette.CARD, fg=palette.TEXT, font=self._rfonts["head"])
         layout: list[tuple[str, object]] = [("line", (head, (0, 12)))]
@@ -314,6 +334,7 @@ class RoutinesPage(TabPage):
             self._rtiles.append(self._build_routine_tile(r))
 
         def done() -> None:
+            self._rtile_grid.restack()  # Tab walks the tiles in the order shown
             self.rcanvas.update_idletasks()
             self.rcanvas.yview_moveto(top if keep_scroll else 0)
             self.refresh_routine_sidebar()
@@ -323,87 +344,33 @@ class RoutinesPage(TabPage):
     def _days(self) -> list[str]:
         return [_(d) for d in WEEKDAYS]
 
-    def _build_routine_tile(self, r: Routine) -> tk.Frame:
-        bg = palette.TILE
-        colour = KIND_COLOURS.get(r.kind, palette.ACCENT)
-        card = RoundCard(self.rgrid, self.app, bg, palette.BORDER, radius=14, outer=palette.CARD, padx=6, pady=4)
-        tile = card.body
-        top = tk.Frame(tile, bg=bg)
-        top.pack(fill="x")
-        avatar = tk.Label(top, text=r.avatar(), bg=bg, fg=colour, font=self._rfonts["avatar"], width=2)
-        avatar.pack(side="left")
-        names = tk.Frame(top, bg=bg)
-        names.pack(side="left", fill="x", expand=True, padx=(8, 0))
-        # the whole name, on two lines or three when it is long
-        title = tk.Label(names, text=r.name or _("(untitled)"), bg=bg, fg=palette.TEXT, font=self._rfonts["title"], anchor="w", justify="left", width=1)
-        title.pack(fill="x")
-        title.bind("<Configure>", lambda e: title.configure(wraplength=max(60, e.width - 2)))
-        sub = tk.Label(names, text=f"{_(KIND_LABELS[r.kind])} · {subtitle(r)}", bg=bg, fg=palette.MUTED, font=self._rfonts["small"], anchor="w", width=1)
-        sub.pack(fill="x")
-        Tooltip(sub, (r.target + (" " + r.args if r.args.strip() else "")).strip())
-        more = tk.Label(top, text="⋯", bg=bg, fg=palette.MUTED, font=self._rfonts["title"], cursor="hand2", padx=4)
-        more.pack(side="right", anchor="n", before=names)  # packed first: a long subtitle cannot push it out
-        more.bind("<Button-1>", lambda e: self._routine_menu(r, e))
+    def kind_colour(self, r: Routine) -> str:
+        return KIND_COLOURS.get(r.kind, palette.ACCENT)
 
-        chips = tk.Frame(tile, bg=bg)
-        chips.pack(fill="x", pady=(8, 0))
-        when = describe_schedule(r.schedule, self._days())
-        if r.schedule.on_unlock:
-            chip(chips, self.app, _("⚡ on unlock"), self._rfonts["small"])
-        if when:
-            chip(chips, self.app, f"⏰ {when}", self._rfonts["small"])
-        if r.terminal:
-            chip(chips, self.app, _("console"), self._rfonts["small"])
-        status = tk.Label(tile, text="", bg=bg, font=self._rfonts["small"], anchor="w")
-        status.pack(fill="x", pady=(6, 0))
-        actions = tk.Frame(tile, bg=bg)
-        actions.pack(fill="x", pady=(8, 0))
-        self._rtile_parts[r.id] = {
-            "status": status,
-            "run": ttk.Button(actions, text=_("▶ Run"), style="Small.TButton", command=lambda: self.app.runs.run_routine(r)),
-            "stop": ttk.Button(actions, text=_("■ Stop"), style="Small.TButton", command=lambda: self.app.runs.stop(r)),
-            "output": ttk.Button(actions, text=_("Output"), style="Link.TButton", command=lambda: self.app.runs.open_output(self.app.runs.latest(r))),
-        }
-        self.update_routine_tile(r)
-        for w in (card, tile, top, avatar, names, *names.winfo_children()):
-            w.bind("<Double-1>", lambda _e: self.app.runs.run_routine(r))
-            w.bind("<Button-3>", lambda e: self._routine_menu(r, e))
-        card.bind("<Enter>", lambda _e: card.set_border(colour), add="+")
-        card.bind("<Leave>", lambda _e: card.focus_get() is not card and card.set_border(palette.BORDER), add="+")
-        # the keyboard: Tab reaches the tile, Enter runs it, the menu key opens its menu
-        card.configure(takefocus=1)
-        card.bind("<FocusIn>", lambda _e: card.set_border(colour, 1.5), add="+")
-        card.bind("<FocusOut>", lambda _e: card.set_border(palette.BORDER), add="+")
-        card.bind("<Return>", lambda _e: self.app.runs.run_routine(r))
-        card.bind("<KP_Enter>", lambda _e: self.app.runs.run_routine(r))
-        for key in ("<App>", "<Shift-F10>"):
-            card.bind(key, lambda _e: self._routine_menu(r, _MenuAt(card)))
-        return card
+    def kind_label(self, r: Routine) -> str:
+        return _(KIND_LABELS[r.kind])
 
+    def _build_routine_tile(self, r: Routine) -> RoutineTile:
+        tile = self._rtiles_by_id[r.id] = RoutineTile(self.rgrid, self, r)
+        return tile
 
-    def update_routine_tile(self, r: Routine) -> None:
-        """The run state on the tile: running with Stop, or how the last run ended."""
-        parts = self._rtile_parts.get(r.id)
-        if parts is None or not parts["status"].winfo_exists():
-            return
+    def run_status(self, r: Routine) -> tuple[str, str, bool, bool]:
+        """What the tile says about the run: (text, colour, running now, a run to show)."""
         run = self.app.runs.latest(r)
         if run is not None and run.running:
-            text, colour = "⏳ " + _("running… {s} s").format(s=int(run.duration())), palette.ACCENT
-        elif run is not None:
+            return "⏳ " + _("running… {s} s").format(s=int(run.duration())), palette.ACCENT, True, True
+        if run is not None:
             ok = run.code == 0
             when = time.strftime("%d.%m %H:%M", time.localtime(run.started))  # when it ran, not only how long
             text = (_("✓ {when} · done in {s} s") if ok else _("✗ {when}, exit code {code}, {s} s")).format(when=when, code=run.code, s=round(run.duration(), 1))
-            colour = palette.SUCCESS if ok else palette.DANGER
-        else:
-            text, colour = self._last_run_text(r), self._last_run_colour(r)
-        parts["status"].configure(text=text, fg=colour)
-        busy = run is not None and run.running
-        want = [parts["stop"] if busy else parts["run"]] + ([parts["output"]] if run is not None else [])
-        if [w for w in parts["run"].master.pack_slaves()] != want:
-            for w in (parts["run"], parts["stop"], parts["output"]):
-                w.pack_forget()
-            for i, w in enumerate(want):
-                w.pack(side="left", padx=(0 if i == 0 else 8, 0))
+            return text, palette.SUCCESS if ok else palette.DANGER, False, True
+        return self._last_run_text(r), self._last_run_colour(r), False, False
+
+    def update_routine_tile(self, r: Routine) -> None:
+        """The run state on the tile: running with Stop, or how the last run ended."""
+        tile = self._rtiles_by_id.get(r.id)
+        if tile is not None and tile.winfo_exists():
+            tile.update_state()
 
     def _refresh_routine_status(self) -> None:
         """A visit to the tab: the state on every tile and the sidebar follow the clock
@@ -508,6 +475,18 @@ class RoutinesPage(TabPage):
         ttk.Entry(grid, textvariable=target_var, width=46).grid(row=2, column=1, sticky="w", pady=4)
         browse = ttk.Button(grid, text=_("Browse…"), style="Small.TButton")
         browse.grid(row=2, column=2, sticky="w", padx=(6, 0))
+        where_label = ttk.Label(grid, text="", style="Muted.TLabel", wraplength=420, justify="left")
+
+        def on_target(*_args):
+            where = risky_location(target_var.get()) if kind() == "script" else ""
+            if where:
+                place = {"share": _("on a network share"), "downloads": _("in Downloads"), "outside": _("outside your profile folder")}[where]
+                where_label.config(text=_("The script is {where}: someone else may be able to change it. Saving accepts the file as it is now; a changed file does not start by itself.").format(where=place))
+                where_label.grid(row=7, column=1, columnspan=2, sticky="w", pady=(2, 4))
+            else:
+                where_label.grid_remove()
+
+        target_var.trace_add("write", on_target)
         args_label = ttk.Label(grid, text=_("Arguments"))
         args_entry = ttk.Entry(grid, textvariable=args_var, width=46)
         cwd_label = ttk.Label(grid, text=_("Working folder"))
@@ -552,7 +531,9 @@ class RoutinesPage(TabPage):
 
         browse.config(command=do_browse)
         kind_var.trace_add("write", on_kind)
+        kind_var.trace_add("write", on_target)
         on_kind()
+        on_target()
 
         divider(box).grid(row=1, column=0, sticky="ew", pady=12)
         when = ttk.Frame(box)
@@ -584,7 +565,8 @@ class RoutinesPage(TabPage):
                 "args": args_var.get().strip() if k == "script" else "", "cwd": cwd_var.get().strip() if k in ("script", "command") else "",
                 "terminal": terminal_var.get() if k in ("script", "command") else False, "icon": icon_var.get().strip(), "schedule": schedule,
             }
-            self.vault.routines.upsert(r, fields, now_local())
+            saved = self.vault.routines.upsert(r, fields, now_local())
+            accept_script(saved)  # saving the tile is the consent to the file as it is now
             self.app.mark_dirty("routines")
             dlg.destroy()
             self._refresh_routines(keep_scroll=True)

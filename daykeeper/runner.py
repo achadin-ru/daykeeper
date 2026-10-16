@@ -47,6 +47,7 @@ class Run:
         self.queue: queue.Queue = queue.Queue()
         env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
         flags = CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        self.proc: subprocess.Popen[bytes] | None
         try:
             self.proc = subprocess.Popen(  # noqa: S603 — the user's own routine from the encrypted vault
                 argv if argv else shell,

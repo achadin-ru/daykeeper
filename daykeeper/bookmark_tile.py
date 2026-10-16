@@ -16,7 +16,7 @@ from . import palette
 from .bookmarks import Bookmark, entry_login, entry_secret, has_secret
 from .i18n import _
 from .theme import blend, shape
-from .widgets import Tooltip
+from .widgets import bind_menu_key, Tooltip
 
 TILE_BG = palette.TILE
 CRED_BG = palette.CRED_BG
@@ -111,8 +111,7 @@ class BookmarkTile(tk.Canvas):
         self.bind("<Return>", lambda _e: page.open_bookmark(bm))
         self.bind("<KP_Enter>", lambda _e: page.open_bookmark(bm))
         self.bind("<Shift-Return>", lambda _e: page.open_bookmark(bm, copy_secret=bool(self.entry and has_secret(self.entry))))
-        for key in ("<App>", "<Shift-F10>"):
-            self.bind(key, lambda _e: page.tile_menu(bm, _At(self)))
+        bind_menu_key(self, lambda _e: page.tile_menu(bm, _At(self)))
         actions = {
             "open": lambda: page.open_bookmark(bm),
             "more": lambda: None,  # its own binding below: the menu needs the event

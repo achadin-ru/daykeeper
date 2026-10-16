@@ -64,7 +64,7 @@ class TesterReportUnchangedTest(LayoutCase):
         day = Day("2026-10-13", columns={"ok": ["APP-1"], "failed": ["APP-2"]}, plans="RFT")
         day.add_activity("review", "!42")
         text = build_report(day)
-        self.assertTrue(text.startswith("1. RFT, reviewed MRs\nMR reviews: !42\nTested successfully:\nAPP-1\n"))
+        self.assertTrue(text.startswith("1. tested tasks, reviewed MRs\nMR reviews: !42\nTested successfully:\nAPP-1\n"), text)
         self.assertTrue(text.endswith("2. RFT\n\n3. None"))
 
 

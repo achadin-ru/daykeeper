@@ -477,3 +477,14 @@ class TileGrid:
             if kind == "tiles":
                 for tile in item:  # type: ignore[union-attr]
                     tile.tk.call("raise", tile._w)
+
+
+def bind_menu_key(widget: tk.Misc, handler) -> None:
+    """The context-menu key of the keyboard on a tile: `<App>` on Windows, `<Menu>` on X11
+    (where Tk has no `App` keysym and raised on the bind, so the first tile never built),
+    `Shift+F10` everywhere."""
+    for key in ("<App>", "<Menu>", "<Shift-F10>"):
+        try:
+            widget.bind(key, handler)
+        except tk.TclError:
+            pass

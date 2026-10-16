@@ -41,7 +41,7 @@ class CatalogTest(unittest.TestCase):
         for pid in jl.PRESETS:
             layout = jl.preset(pid)
             for item in layout.columns + layout.kinds:
-                keys += [item.label] + ([item.phrase] if item.phrase and item.phrase != "RFT" else [])
+                keys += [item.label] + ([item.phrase] if item.phrase else [])
                 keys += [item.button] if getattr(item, "button", "") else []
         self.assertEqual(sorted({k for k in keys if k not in RU}), [])
 
@@ -61,6 +61,7 @@ class CatalogTest(unittest.TestCase):
 
         keys = [p.title for p in h.PRESETS] + [p.hint for p in h.PRESETS] + [p.example for p in h.PRESETS] + list(h.TAKE_LABELS.values()) + list(h.WHERE_LABELS.values())
         keys += [h.Rule(pattern="").problem(), h.Rule(pattern="(", regex=True).problem(), h.Rule(pattern="x", text="").problem()]
+        keys += [h.Rule(pattern="^(a+)+$", regex=True).problem(), h.Rule(pattern="^(a|aa)+$", regex=True).problem(), h.Rule(pattern="\\d+\\d+", regex=True).problem(), h.Rule(pattern="x" * 501).problem()]
         self.assertEqual([k for k in keys if k not in RU], [])
 
     def test_no_parameter_hides_the_translator(self):

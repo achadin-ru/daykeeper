@@ -21,6 +21,7 @@ from . import RELEASES_URL, __version__, autostart, palette, theme, win32
 from .claude_view import ClaudeSection
 from .dialogs import BULLET, ask_yes_no, show_error, show_info
 from .i18n import LANGUAGES, _, language
+from .session import COPY_PREFIX, sweep_preview_copies
 from .journal_settings_view import JournalSection
 from .popup import Dropdown
 from .journal import configure as configure_links, inbox_path_for, links as current_links
@@ -582,8 +583,9 @@ class SettingsWindow(tk.Toplevel):
     def _open_copy(self, path: Path) -> None:
         """A second window of the app on a duplicate of the copy (a temporary folder): the
         copy itself stays as it was, whatever is done there."""
+        sweep_preview_copies()  # folders a crashed preview left behind
         try:
-            folder = Path(tempfile.mkdtemp(prefix="daykeeper-copy-"))
+            folder = Path(tempfile.mkdtemp(prefix=COPY_PREFIX))
             target = folder / path.name
             shutil.copy2(path, target)
             args = autostart.launch_args(False, target, default_vault_path()) + ["--preview"]
@@ -592,8 +594,12 @@ class SettingsWindow(tk.Toplevel):
             show_error(self, _("Could not open the copy:\n{error}").format(error=exc))
 
     def _restore_copy(self, path: Path) -> None:
-        if not ask_yes_no(self, _("Make the copy of {when} the vault?\n\nThe vault as it is now is kept beside it. The app then locks: open it with the master password of that copy.").format(
-                when=time.strftime("%d.%m.%Y %H:%M", time.localtime(path.stat().st_mtime)))):
+        try:
+            when = time.strftime("%d.%m.%Y %H:%M", time.localtime(path.stat().st_mtime))
+        except OSError as exc:  # deleted meanwhile
+            show_error(self, _("Could not restore:\n{error}").format(error=exc))
+            return
+        if not ask_yes_no(self, _("Make the copy of {when} the vault?\n\nThe vault as it is now is kept beside it. The app then locks: open it with the master password of that copy.").format(when=when)):
             return
         app = self.app
         app.save_now()

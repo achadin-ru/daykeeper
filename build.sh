@@ -10,6 +10,14 @@ fi
 if [ "$(uname)" = "Darwin" ]; then
     .venv/bin/python -m PyInstaller --noconfirm --clean --windowed --noupx --name Daykeeper \
         --osx-bundle-identifier ru.achadin.daykeeper main.py
+    # the version into Info.plist (PyInstaller writes 0.0.0), the minimum system, then the
+    # ad-hoc signature again — the plist edit breaks the one PyInstaller made
+    VERSION=$(.venv/bin/python -c "import daykeeper; print(daykeeper.__version__)")
+    PLIST=dist/Daykeeper.app/Contents/Info.plist
+    plutil -replace CFBundleShortVersionString -string "$VERSION" "$PLIST"
+    plutil -replace CFBundleVersion -string "$VERSION" "$PLIST"
+    plutil -replace LSMinimumSystemVersion -string "14.0" "$PLIST"
+    codesign --force --deep --sign - dist/Daykeeper.app
     ditto -c -k --sequesterRsrc --keepParent dist/Daykeeper.app dist/Daykeeper-macos.zip
     echo "Done: $(pwd)/dist/Daykeeper.app"
     shasum -a 256 dist/Daykeeper-macos.zip

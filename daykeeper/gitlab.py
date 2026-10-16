@@ -21,6 +21,8 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 
+from .settings import number
+
 # Rules: code → (UI label key, on by default).
 RULES: dict[str, tuple[str, bool]] = {
     "approved": ("My MR got an approval", True),
@@ -133,7 +135,7 @@ class Event:
     def from_dict(cls, d: dict) -> Event:
         return cls(
             kind=str(d.get("kind", "")), mr=str(d.get("mr", "")), title=str(d.get("title", "")), url=web_url(d.get("url")),
-            text=str(d.get("text", "")), args=dict(d.get("args") or {}), ts=float(d.get("ts", time.time())), read=bool(d.get("read", False)),
+            text=str(d.get("text", "")), args=dict(d["args"]) if isinstance(d.get("args"), dict) else {}, ts=number(float, d.get("ts"), None) or time.time(), read=bool(d.get("read", False)),
         )
 
 

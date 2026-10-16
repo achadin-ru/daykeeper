@@ -38,7 +38,7 @@ from .security import SecurityPrefs
 from .settings import app_dir, private
 
 UNDO_DOMAINS = ("vault", "journal", "notes", "bookmarks", "routines")  # what Ctrl+Z puts back
-RUN_FIELDS = ("last_run", "last_code")  # a routine's run state: not the user's edit
+RUN_FIELDS = ("last_run", "last_code", "target_hash")  # a routine's run state and the script it accepted: not the user's edit
 SITE_FIELDS = ("opened", "favicon", "site_colour", "site_checked", "favicon_small", "favicon_small_px")  # a bookmark's look, fetched
 
 MAGIC = b"PKV2"  # the secret fields are sealed inside the content (Sealer); written by 1.1+
@@ -50,19 +50,27 @@ KEY_LEN = 32
 HEADER_FMT = ">4s16sIII12s"
 HEADER_LEN = struct.calcsize(HEADER_FMT)
 
-# Default Argon2id parameters: about 0.2–0.4 s on an ordinary PC.
-DEFAULT_ITERATIONS = 3
+# Default Argon2id parameters: about 0.1–0.2 s on an ordinary PC (t=3 took 55 ms on a
+# 2026 desktop, which is on the low side for the cost of a guess; the derivation runs on
+# a thread, so the window does not feel the doubling). Files written with t=3 open as before.
+DEFAULT_ITERATIONS = 6
 DEFAULT_MEMORY_KIB = 64 * 1024
 DEFAULT_LANES = 4
 
 # Bounds for Argon2id parameters read from a file header. The header is checked only
 # after the key is derived, so a forged header must not be able to make the app allocate
-# gigabytes or spin for minutes before the password is even tested. Four times the
-# defaults each way: every file the app writes uses the defaults, and at the old bounds
-# (1 GiB, 64 passes) a forged header froze the window for 13 s per try.
-MAX_ITERATIONS = 4 * DEFAULT_ITERATIONS
+# gigabytes or spin for minutes before the password is even tested. At the old bounds
+# (1 GiB, 64 passes) a forged header froze the window for 13 s per try; at these a forged
+# header costs at most ~2.3 s per try (measured). Every file the app writes uses the defaults.
+MAX_ITERATIONS = 2 * DEFAULT_ITERATIONS
 MAX_MEMORY_KIB = 4 * DEFAULT_MEMORY_KIB  # 256 MiB
 MAX_LANES = 2 * DEFAULT_LANES
+
+# Python keeps an unpaired surrogate in a str (a Windows file name may carry one, and it
+# comes in through a file dialog or the clipboard); strict UTF-8 refuses it, and one such
+# character made every autosave raise until the user found it. Inside the vault the text
+# goes through as it is and comes back the same; a readable export replaces it (session.py).
+TEXT_ERRORS = "surrogatepass"
 
 BACKUP_KEEP = 20  # the newest copies
 BACKUP_EVERY = 10 * 60  # s; autosaves (a GitLab check, a routine run) must not wash the copies out
@@ -168,10 +176,10 @@ class Sealer:
 
     def seal(self, text: str) -> bytes:
         nonce = secrets.token_bytes(NONCE_LEN)
-        return nonce + AESGCM(self.key).encrypt(nonce, text.encode("utf-8"), self.AAD)
+        return nonce + AESGCM(self.key).encrypt(nonce, text.encode("utf-8", TEXT_ERRORS), self.AAD)
 
     def open(self, blob: bytes) -> str:
-        return AESGCM(self.key).decrypt(blob[:NONCE_LEN], blob[NONCE_LEN:], self.AAD).decode("utf-8")
+        return AESGCM(self.key).decrypt(blob[:NONCE_LEN], blob[NONCE_LEN:], self.AAD).decode("utf-8", TEXT_ERRORS)
 
     def forget(self) -> None:
         for i in range(len(self.key)):
@@ -183,7 +191,7 @@ class Field:
     belongs to an open vault (`bind`); `value` opens it for the moment it is read. A field
     made by hand holds its value plain until the vault binds it (at the next save)."""
 
-    __slots__ = ("key", "_secret", "_plain", "_sealed", "_sealer")
+    __slots__ = ("key", "_secret", "_plain", "_sealed", "_sealer", "_damaged")
 
     def __init__(self, key: str = "", value: str = "", secret: bool = False, sealer: Sealer | None = None):
         self.key = key
@@ -191,6 +199,7 @@ class Field:
         self._plain = ""
         self._sealed: bytes | None = None
         self._sealer = sealer
+        self._damaged = ""  # a sealed value from the file that could not be decoded: kept as it was, so a save does not lose it
         self.value = value
 
     @property
@@ -204,6 +213,8 @@ class Field:
         text = str(text)
         if (self._sealed is not None or self._plain) and text == self.value:
             return  # the same value: a new seal would only look like a change
+        if text:
+            self._damaged = ""  # typed over: the unreadable value is given up on purpose
         if self._secret and self._sealer is not None and text:
             self._sealed, self._plain = self._sealer.seal(text), ""
         else:
@@ -225,7 +236,13 @@ class Field:
     @property
     def filled(self) -> bool:
         """Has a value — without opening a sealed one."""
-        return self._sealed is not None or bool(self._plain.strip())
+        return self._sealed is not None or bool(self._plain.strip()) or bool(self._damaged)
+
+    @property
+    def unreadable(self) -> bool:
+        """The file held a sealed value that could not be decoded: the card says so instead
+        of showing an empty field, and a save writes it back as it was."""
+        return bool(self._damaged) and self._sealed is None and not self._plain
 
     def bind(self, sealer: Sealer) -> None:
         """Belong to the vault of `sealer`: a secret value is sealed with its key."""
@@ -240,6 +257,8 @@ class Field:
         (an export, which the user asked for with the master password)."""
         if self._sealed is not None and not plain:
             return {"key": self.key, "sealed": base64.b64encode(self._sealed).decode("ascii"), "secret": True}
+        if self.unreadable and not plain:
+            return {"key": self.key, "sealed": self._damaged, "secret": True}
         return {"key": self.key, "value": self.value, "secret": self._secret}
 
     @staticmethod
@@ -251,7 +270,7 @@ class Field:
             try:
                 f._sealed = base64.b64decode(sealed, validate=True)
             except ValueError:
-                f._sealed = None
+                f._sealed, f._damaged = None, sealed
         else:
             f.value = str(d.get("value", ""))  # a file of 1.0, an export: sealed by `sealer` if given
         return f
@@ -317,12 +336,19 @@ def _number(kind, value, default):
         return default
 
 
-def _stamp_of(path: Path) -> tuple[int, int] | None:
+def _stamp_of(path: Path) -> tuple[int, int, bytes] | None:
+    """What identifies the file on disk: its time, its size and the nonce of its header.
+    A sync tool (OneDrive, iCloud, `copy2`) puts another version in place with the time
+    and the size kept; the nonce is fresh on every write, so it tells them apart."""
     try:
         st = path.stat()
+        with open(path, "rb") as fh:
+            header = fh.read(HEADER_LEN)
     except FileNotFoundError:
         return None
-    return st.st_mtime_ns, st.st_size
+    except OSError:
+        header = b""
+    return st.st_mtime_ns, st.st_size, header[HEADER_LEN - NONCE_LEN :]
 
 
 def backups_to_drop(copies: list[Path], now: float) -> list[Path]:
@@ -383,7 +409,8 @@ class Vault:
         self.routines: Routines = routines or Routines()
         self._normalize()
         self._saved_digest = b""  # what is on disk, as this window last read or wrote it
-        self._disk_stamp: tuple[int, int] | None = None
+        self._disk_stamp: tuple[int, int, bytes] | None = None
+        self._copy_due = False  # the next save keeps a copy whatever the cadence (set after an open: the undo history died with the lock)
 
     def _normalize(self) -> None:
         """Older file: hand out positions in order, register lists that entries refer to.
@@ -421,12 +448,13 @@ class Vault:
             plain = AESGCM(key).decrypt(nonce, blob[HEADER_LEN:], header)
         except InvalidTag as exc:
             raise WrongPassword(_("Wrong master password")) from exc
-        data = json.loads(plain.decode("utf-8"))
+        data = json.loads(plain.decode("utf-8", TEXT_ERRORS))
         vault = cls(path, key, salt, params, [])
         vault._load(data if isinstance(data, dict) else {})
         vault.upgraded = blob.startswith(OLD_MAGICS)
         vault._saved_digest = hashlib.sha256(vault._payload()).digest()
         vault._disk_stamp = _stamp_of(Path(path))
+        vault._copy_due = True
         return vault
 
     def _load(self, data: dict, parts: tuple[str, ...] = ("vault", "field_key", "journal", "notes", "bookmarks", "security", "integrations", "routines")) -> None:
@@ -499,7 +527,7 @@ class Vault:
                 "routines": self.routines.to_list(),
             },
             ensure_ascii=False,
-        ).encode("utf-8")
+        ).encode("utf-8", TEXT_ERRORS)
 
     def _encrypt(self) -> bytes:
         return self._seal(self._payload())
@@ -516,17 +544,23 @@ class Vault:
         if not self.path.parent.exists():
             self.path.parent.mkdir(parents=True, exist_ok=True)
             private(self.path.parent, folder=True)
-        self._backup()
+        self._backup(force=self._copy_due)
+        self._copy_due = False
         write_private(self.path, self._seal(payload))
         self._saved_digest, self._disk_stamp = digest, _stamp_of(self.path)
         return True
+
+    def backup_now(self) -> None:
+        """A copy of the file as it is, whatever the cadence: before an action undo cannot
+        take back once the window is locked (a list or a day deleted)."""
+        self._backup(force=True)
 
     def save_copy(self, path: Path) -> None:
         """Write what this window holds to another file, under the same password — the way
         out of a conflict (ChangedOnDisk) without losing either side."""
         write_private(Path(path), self._seal(self._payload()))
 
-    def _backup(self) -> None:
+    def _backup(self, force: bool = False) -> None:
         if not self.path.exists():
             return
         backup_dir = self.path.parent / "backup"
@@ -536,9 +570,13 @@ class Vault:
         pattern = f"{self.path.stem}-*{self.path.suffix}"
         copies = sorted(backup_dir.glob(pattern))
         now = time.time()
-        if copies and now - copies[-1].stat().st_mtime < BACKUP_EVERY:
+        if copies and now - copies[-1].stat().st_mtime < BACKUP_EVERY and not force:
             return  # a fresh copy is there already
         target = backup_dir / f"{self.path.stem}-{time.strftime('%Y%m%d-%H%M%S', time.localtime(now))}{self.path.suffix}"
+        n = 1
+        while target.exists():  # a forced copy within the same second must not write over the one before it
+            target = target.with_name(f"{target.stem.rsplit('-', 1)[0] if n > 1 else target.stem}-{n}{target.suffix}")
+            n += 1
         target.write_bytes(self.path.read_bytes())
         private(target)
         for extra in backups_to_drop(sorted(backup_dir.glob(pattern)), now):
@@ -552,6 +590,11 @@ class Vault:
         self._salt = secrets.token_bytes(SALT_LEN)
         self._params = (DEFAULT_ITERATIONS, DEFAULT_MEMORY_KIB, DEFAULT_LANES)
         self._key = bytearray(_derive_key(new_password, self._salt, *self._params))
+        old_sealer, self._sealer = self._sealer, Sealer()  # a new field key too: whoever held the old file and password keeps nothing of the new one
+        for e in self.entries:
+            for f in e.fields:
+                f.bind(self._sealer)
+        old_sealer.forget()
         self.save(force=True)
         return self._rekey_backups(old_key, old_salt, old_params)
 
@@ -605,6 +648,81 @@ class Vault:
         else:
             raise KeyError(domain)
         return json.dumps(data, ensure_ascii=False, sort_keys=True)
+
+    GROUPS_KEY = "\x00groups"  # the lists of entries / the groups of bookmarks, beside the objects by id
+
+    def object_states(self, domain: str) -> dict[str, str]:
+        """One part of the data as `key → JSON of one object` for undo (undo.History): an
+        entry, a day, a note, a bookmark, a routine each on its own, so a step keeps only
+        the objects that changed. The same leaves as domain_state: no run state, no fetched
+        icon, no empty day; `GROUPS_KEY` holds the lists / groups."""
+        dumps = lambda data: json.dumps(data, ensure_ascii=False, sort_keys=True)  # noqa: E731
+        if domain == "vault":
+            states = {e.id: dumps(e.to_dict()) for e in self.entries}
+            states[self.GROUPS_KEY] = dumps(self.groups)
+        elif domain == "journal":
+            states = {d["date"]: dumps(d) for d in self.journal.to_list() if d.get("summary") or d.get("columns") or d.get("activities") or d.get("plans") or d.get("other")}
+        elif domain == "notes":
+            states = {n["id"]: dumps(n) for n in self.notes.to_list()}
+        elif domain == "bookmarks":
+            data = self.bookmarks.to_dict()
+            states = {b["id"]: dumps({k: v for k, v in b.items() if k not in SITE_FIELDS}) for b in data["items"]}
+            states[self.GROUPS_KEY] = dumps(data["groups"])
+        elif domain == "routines":
+            states = {r["id"]: dumps({k: v for k, v in r.items() if k not in RUN_FIELDS}) for r in self.routines.to_list()}
+        else:
+            raise KeyError(domain)
+        return states
+
+    def set_object_state(self, domain: str, key: str, state: str | None) -> None:
+        """Put one object back from `object_states` text; `state` None removes it. A routine
+        is updated in place by id and keeps its run; a bookmark keeps its fetched icon."""
+        data = None if state is None else json.loads(state)
+        if domain == "vault":
+            if key == self.GROUPS_KEY:
+                self.groups = [str(g) for g in (data or []) if str(g)]
+                return
+            self.entries = [e for e in self.entries if e.id != key]
+            if data is not None:
+                self.entries.append(Entry.from_dict(data, self._sealer))
+                self.entries.sort(key=lambda e: e.order)
+        elif domain == "journal":
+            if data is None:
+                self.journal.remove(key)
+            else:
+                self.journal.days[key] = Journal.from_list([data]).days[key]
+        elif domain == "notes":
+            self.notes.notes = [n for n in self.notes.notes if n.id != key]
+            if data is not None:
+                self.notes.notes.extend(Notes.from_list([data]).notes)
+        elif domain == "bookmarks":
+            if key == self.GROUPS_KEY:
+                self.bookmarks.groups = [str(g) for g in (data or []) if str(g)]
+                return
+            old = self.bookmarks.get(key)
+            self.bookmarks.items = [b for b in self.bookmarks.items if b.id != key]
+            if data is not None:
+                fresh = Bookmarks.from_dict({"groups": [], "items": [data]}).items[0]
+                if old is not None:  # the site's icon and the last opening stay as they are now
+                    for name in SITE_FIELDS:
+                        setattr(fresh, name, getattr(old, name))
+                self.bookmarks.items.append(fresh)
+                if fresh.group and fresh.group not in self.bookmarks.groups:
+                    self.bookmarks.groups.append(fresh.group)
+        elif domain == "routines":
+            running = self.routines.get(key)
+            if data is None:
+                self.routines.items = [r for r in self.routines.items if r.id != key]
+                return
+            restored = Routine.from_dict(data)
+            if running is not None:
+                for name in RUN_FIELDS:
+                    setattr(restored, name, getattr(running, name))
+                running.__dict__.update(restored.__dict__)
+            else:
+                self.routines.items.append(restored)
+        else:
+            raise KeyError(domain)
 
     def set_domain_state(self, domain: str, state: str) -> None:
         """Put a part back from `domain_state` text. Routines are updated in place by id:

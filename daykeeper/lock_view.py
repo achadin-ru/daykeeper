@@ -51,7 +51,8 @@ class SecurityController:
         for seq in ("<KeyPress>", "<ButtonPress>", "<MouseWheel>", "<Motion>"):
             app.bind_all(seq, self._touch_idle, add="+")
         app.bind_root("<Unmap>", self._on_unmap)  # the window's own unmap, not every widget's
-        Ticker(app, IDLE_CHECK_MS, self._check_idle).start()
+        self.ticker = Ticker(app, IDLE_CHECK_MS, self._check_idle)
+        self.ticker.start()
 
     @property
     def vault(self):
@@ -81,7 +82,7 @@ class SecurityController:
     def _on_unmap(self, event: tk.Event) -> None:
         if event.widget is not self.app or self.vault is None or not self.vault.security.lock_on_minimize:
             return
-        self.app.after(50, lambda: self.vault is not None and self.app.state() == "iconic" and self.app.lock())
+        self.app._after_jobs.append(self.app.after(50, lambda: self.vault is not None and self.app.state() == "iconic" and self.app.lock()))
 
     # ---- the Passwords tab guard
 
@@ -94,15 +95,26 @@ class SecurityController:
             return
         self.app.save_now()
         self.vault_locked = True
+        self.app.pages["vault"].guard(True)  # the list and the card go off the screen, the card forgets the entry
         self._show_guard()
         if "bookmarks" in self.app.pages:
             self.app.pages["bookmarks"].refresh(keep_scroll=True)
         self.app.set_status(_("Passwords are locked"))
 
+    def restore_guard(self) -> None:
+        """The Passwords tab was made anew while locked (an undo rebuilt it): the new one
+        starts behind the guard too."""
+        if self.vault_locked and "vault" in self.app.pages:
+            self.app.pages["vault"].guard(True)
+            self._guard_frame = None  # the old screen went with the old tab
+            self._show_guard()
+
     def unlock_secrets(self) -> None:
         self.vault_locked = False
         self._idle.touch(time.monotonic())
         self._hide_guard()
+        if "vault" in self.app.pages:
+            self.app.pages["vault"].guard(False)
         if "bookmarks" in self.app.pages:
             self.app.pages["bookmarks"].refresh(keep_scroll=True)
 

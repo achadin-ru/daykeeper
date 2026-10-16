@@ -184,7 +184,7 @@ def import_all_dialog(app: tk.Tk) -> Dialog | None:
             return
         try:
             keep = app.session.import_full(Path(source))
-        except (OSError, ValueError) as exc:  # json.JSONDecodeError is a ValueError
+        except (OSError, ValueError, TypeError) as exc:  # json.JSONDecodeError is a ValueError; TypeError — a shape no parser expected
             err.config(text=_("Could not import: {error}").format(error=exc))
             return
         dlg.destroy()

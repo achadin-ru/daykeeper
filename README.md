@@ -41,13 +41,16 @@ it still asks for the master password:
      xattr -dr com.apple.quarantine /Applications/Daykeeper.app
      ```
 
-From source (Python 3.12+ with tkinter):
+From source (Python 3.13 with tkinter — the version the builds and CI use, `pyproject.toml`; `build.bat` makes its venv with it):
 
 ```
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt      # macOS / Linux: .venv/bin/pip
 .venv\Scripts\python main.py                        # macOS / Linux: .venv/bin/python main.py
 ```
+
+Linux: from source only (the same command; `python3-tkinter` from the distribution). The
+suite runs there under Xvfb in CI; there is no Linux build on the Releases page.
 
 Build it yourself — `build.bat` on Windows (one windowless file, `dist\Daykeeper.exe`, which
 carries the console helper `dist\daykeeper-cli\` inside),
@@ -60,7 +63,15 @@ Windows and macOS, then attaches both files and `SHA256SUMS.txt` to the release
 ```
 certutil -hashfile Daykeeper.exe SHA256          # Windows
 shasum -a 256 Daykeeper-macos.zip                # macOS
+gh attestation verify Daykeeper.exe --owner <the repository owner>   # provenance: which workflow run built it
 ```
+
+The release also publishes a signed provenance statement for each file (GitHub's build
+attestation): `gh attestation verify` proves the file came out of this repository's
+workflow at a given commit. The binaries themselves are not code-signed — that needs a
+certificate (a Windows code-signing certificate, an Apple Developer ID) that the project
+does not have; until it does, Windows SmartScreen and macOS Gatekeeper will warn as
+described above.
 
 The vault file lives in the data folder — `%APPDATA%\Daykeeper\vault.pkv` on Windows,
 `~/Library/Application Support/Daykeeper/vault.pkv` on macOS; another path can be passed
@@ -116,7 +127,9 @@ your system. `Ctrl+1…6` and `Ctrl+Tab` switch the tabs.
 - Right-click → "Make a bookmark…" turns an entry into a bookmark tile.
 
 Shortcuts: `Ctrl+N` new entry (login and password), `Ctrl+F` search, `Ctrl+E` export,
-`Delete` in the list — delete.
+`Delete` in the list — delete. Without the mouse: `Ctrl+F`, type, `Enter` (the first hit
+is on the card), `Ctrl+Shift+C` copies its password, `Ctrl+B` its login; `↓` walks from
+the search into the list, `Esc` clears the search.
 
 ## Bookmarks
 
@@ -220,9 +233,12 @@ day above them scrolls.
     `daykeeper/claudecode.py` (the files), `daykeeper/claude_view.py` (the section).
 
 **Undo and redo** — `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`) and ↶ ↷ in the top bar: the
-last changes to passwords, the journal, notes, bookmarks and routines (100 steps; changes
-0.7 s apart are one step). Inside a text field `Ctrl+Z` undoes the typing. Items from the
-inbox, a routine's run and a bookmark's fetched icon are not undone (`daykeeper/undo.py`).
+last changes to passwords, the journal, notes, bookmarks and routines (100 steps or 20 MB
+of kept state, whichever comes first; changes 0.7 s apart are one step). A step keeps only
+the objects that changed — one entry, one day, one tile — so the history stays small on a
+large vault. Inside a text field `Ctrl+Z` undoes the typing. Items from the inbox, a
+routine's run, the script a routine accepted and a bookmark's fetched icon are not undone
+(`daykeeper/undo.py`).
 
 ## Notes
 
@@ -256,7 +272,12 @@ folder or a file. ▶ runs it: scripts and commands show an output window with t
 log, Stop (it ends the script with everything it started) and Run again; "Open in a
 separate console window" is for interactive scripts. `Tab` reaches a tile, `Enter` runs it.
 A `.ps1` script always runs with `-ExecutionPolicy Bypass`: adding a tile is the
-consent to run that script, whatever the machine-wide PowerShell policy says.
+consent to run that script, whatever the machine-wide PowerShell policy says — and the
+consent is to the file as it is, not to the path: saving the tile or running it by hand
+records a hash of the script (and of what a shortcut points to), and an automatic run
+starts only that version. A changed or never-accepted script waits for a run by hand,
+which asks before accepting the new version; the editor warns when the script sits on a
+network share, in Downloads or outside the profile folder.
 
 A routine can start by itself each time the vault is unlocked, or at a time of day on
 chosen weekdays — once a day; if the app was closed at that time, it runs when the app
@@ -315,8 +336,10 @@ Settings → Data:
 
 ## Security
 
-- The master password becomes a key through Argon2id (64 MiB, 3 iterations), on a
-  background thread: the window keeps painting while it works.
+- The master password becomes a key through Argon2id (64 MiB, 6 iterations, about 0.1 s
+  on a desktop of 2026; files written with 3 open as before), on a background thread: the
+  window keeps painting while it works. Wrong passwords on the unlock screen wait like
+  wrong PIN codes do.
 - The value of every secret field is sealed a second time (AES-256-GCM) with a field key
   that lives inside the encrypted content. In memory it stays sealed and is opened only
   for the moment it is shown or copied, so the content decrypted at unlock, each autosave
@@ -377,7 +400,7 @@ first visit.
 ```
 
 The models, the session, the timers, the jobs and the runner are tested without a
-window; `tests/test_app_smoke.py` and `tests/test_audit_fixes.py` open the whole window
+window; `tests/test_app_smoke.py`, `tests/test_audit_fixes.py` and `tests/test_audit_1016.py` open the whole window
 on a temporary vault (every tab, the locks, a conflict, the dark theme in a separate
 process) and are skipped where there is no display.
 

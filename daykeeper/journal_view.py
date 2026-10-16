@@ -16,7 +16,7 @@ from .palette import BG, FONT, MONO, TEXT, WHITE, pt
 from .popup import PopupMenu
 from .sidebar import SidebarKeeper
 from .tabpage import Shell, TabPage, make_scrollable
-from .widgets import FlowRow, Placeholder, TextField, Tooltip, soft_edge
+from .widgets import FlowRow, Placeholder, TextField, Tooltip, more_button, soft_edge
 
 
 class JournalPage(TabPage):
@@ -92,8 +92,10 @@ class JournalPage(TabPage):
         self.jactivity.grid(row=11, column=0, columnspan=span, sticky="ew")
         self.jactivity.bind("<<Modified>>", lambda _e: self._jtext_modified("activities"))
 
+        # the verdict columns come right after the summary — what passed and failed is the
+        # point of the tab, and at 760 px of height they sat below the fold under the activity box
         quick = FlowRow(right, style="Card.TFrame")
-        quick.grid(row=12, column=0, columnspan=span, sticky="ew", pady=(14, 4))
+        quick.grid(row=3, column=0, columnspan=span, sticky="ew", pady=(14, 4))
         add = ttk.Frame(quick, style="Card.TFrame")  # the label stays with its field
         ttk.Label(add, text=_("Add"), style="CardMuted.TLabel").pack(side="left")
         self.jquick_var = tk.StringVar()
@@ -117,7 +119,7 @@ class JournalPage(TabPage):
         self.jsections: dict[str, TextField] = {}
         for i, col in enumerate(columns):
             box = ttk.Frame(right, style="Card.TFrame")
-            box.grid(row=13, column=i, sticky="nsew", padx=(0 if i == 0 else 8, 0))
+            box.grid(row=4, column=i, sticky="nsew", padx=(0 if i == 0 else 8, 0))
             ttk.Label(box, text=_(col.label).upper(), style="Section.TLabel").pack(anchor="w", pady=(6, 4))
             txt = TextField(box, height=8)
             txt.pack(fill="both", expand=True)
@@ -131,17 +133,20 @@ class JournalPage(TabPage):
             self.jplans.grid(row=15, column=0, columnspan=span, sticky="ew")
         self.jplans.bind("<<Modified>>", lambda _e: self._jtext_modified("plans"))
         if layout.show_other:
-            other_title = _("3. ABSENCE / EXTRA INFO") if layout.show_plans else _("2. ABSENCE / EXTRA INFO")
+            other_title = _("3. OUT OF OFFICE / OTHER") if layout.show_plans else _("2. OUT OF OFFICE / OTHER")
             ttk.Label(right, text=other_title, style="Section.TLabel").grid(row=16, column=0, columnspan=span, sticky="w", pady=(14, 4))
             self.jother.grid(row=17, column=0, columnspan=span, sticky="ew")
         self.jother.bind("<<Modified>>", lambda _e: self._jtext_modified("other"))
 
         actions.add(ttk.Button(actions, text=_("📋  Build report"), style="Primary.TButton", command=self.report_dialog))
-        actions.add(ttk.Button(actions, text=_("Links…"), style="Small.TButton", command=lambda: self.app.settings_dialog("links")), padx=(8, 0))
-        setup = ttk.Button(actions, text=_("Set up the journal…"), style="Small.TButton", command=lambda: self.app.settings_dialog("journal"))
-        actions.add(setup, padx=(8, 0))
-        Tooltip(setup, _("Columns, kinds of activity and the report: a ready-made layout for your work or your own"))
-        actions.add(ttk.Button(actions, text=_("Pick up from sessions"), style="Small.TButton", command=lambda: self.app.pull_inbox(loud=True)), padx=(10, 0))
+        inbox_btn = ttk.Button(actions, text=_("Read the inbox now"), style="Small.TButton", command=lambda: self.app.pull_inbox(loud=True))
+        actions.add(inbox_btn, padx=(8, 0))
+        Tooltip(inbox_btn, _("The sessions' inbox is read every minute by itself; this reads it right away"))
+        # the settings of the journal are a menu, not two more buttons: the bar is one line
+        # even in a narrow window, and the columns above it get the height
+        self.jmore = more_button(actions, [(_("Links…"), lambda: self.app.settings_dialog("links")), (_("Set up the journal…"), lambda: self.app.settings_dialog("journal"))])
+        actions.add(self.jmore, padx=(6, 0))
+        Tooltip(self.jmore, _("Links to the tracker and GitLab; the columns, kinds of activity and the report"))
         self.jinbox_label = ttk.Label(actions, text="", style="CardMuted.TLabel")
         actions.add(self.jinbox_label, padx=(10, 0), side="right")
         self._jinbox_tip = Tooltip(self.jinbox_label, "")
@@ -198,6 +203,7 @@ class JournalPage(TabPage):
             return
         if not ask_yes_no(self.app, _("Delete day {day} from the journal?").format(day=fmt_day(self.jday.date))):
             return
+        self.vault.backup_now()  # a deleted day cannot be undone after a lock: a copy first
         self.vault.journal.remove(self.jday.date)
         self.jday = None
         self._refresh_days()

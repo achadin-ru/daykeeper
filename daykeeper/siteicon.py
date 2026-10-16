@@ -11,8 +11,10 @@ without a window; `fetch` does the network part and is run in a background threa
 from __future__ import annotations
 
 import colorsys
+import ipaddress
 import json
 import re
+import socket
 import struct
 import urllib.request
 import zlib
@@ -446,13 +448,51 @@ def candidates(page_url: str, parser: _HeadParser, manifest: dict | None) -> lis
     return list(dict.fromkeys(out))  # each address once, in order
 
 
+def is_private_host(host: str, resolve=socket.gethostbyname) -> bool:
+    """Loopback, link-local, private or unresolvable: a redirect there from a public site
+    would make the icon fetch probe the user's own network."""
+    host = host.strip("[]").lower()
+    if not host or host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        try:
+            ip = ipaddress.ip_address(resolve(host))
+        except (OSError, ValueError):
+            return True
+    return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_unspecified or ip.is_multicast
+
+
+def redirect_allowed(from_url: str, to_url: str, resolve=socket.gethostbyname) -> bool:
+    """A redirect of an icon fetch is followed only to http(s), and into a private network
+    only back to the bookmark's own host and port: a site must not be able to make the
+    app knock on other machines or ports of the user's network."""
+    to, src = urlparse(to_url), urlparse(from_url)
+    if to.scheme not in ("http", "https"):
+        return False
+    if is_private_host(to.hostname or "", resolve):
+        return (to.hostname or "").lower() == (src.hostname or "").lower() and to.port == src.port
+    return True
+
+
+class _SafeRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not redirect_allowed(req.full_url, newurl):
+            return None  # urllib raises the HTTPError of the redirect; fetch() tries the next candidate
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = urllib.request.build_opener(_SafeRedirects())
+
+
 def _get(url: str, limit: int, opener) -> tuple[bytes, str]:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "*/*"})  # noqa: S310 — the user's own bookmark, http(s) only
     with opener(req, timeout=TIMEOUT) as resp:  # noqa: S310 — the user's own bookmark
         return resp.read(limit + 1)[:limit], resp.geturl()
 
 
-def fetch(url: str, opener=urllib.request.urlopen) -> SiteInfo:
+def fetch(url: str, opener=_OPENER.open) -> SiteInfo:
     """The icon and the colour of the site at `url`. Never raises: a site that does not
     answer or gives nothing usable yields an empty SiteInfo."""
     info = SiteInfo()

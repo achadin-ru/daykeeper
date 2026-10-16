@@ -399,6 +399,8 @@ class ClaudeSection:
             for row in rows:
                 if "error" in row:
                     text, style = f"{row.get('ts', '')}  {_('error')}: {row['error']}", "CardError.TLabel"
+                elif row.get("slow_rules"):
+                    text, style = f"{row.get('ts', '')[5:16]}  " + "; ".join(_("rule “{name}” ran too long on that answer and was skipped").format(name=n) for n in row["slow_rules"]), "CardError.TLabel"
                 else:
                     events = "; ".join(_event_text(*e) for e in row.get("events", []) if len(e) == 3)
                     skipped = f"  ({_('folder skipped')})" if row.get("skipped") == "folder" else ""

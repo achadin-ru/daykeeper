@@ -23,12 +23,22 @@ from .markdown import Block, parse, table_lines, toggle_task
 from .widgets import Tooltip, make_fonts, divider
 
 MD_SUFFIXES = {".md", ".markdown", ".mdown"}
-# a link in a document must not start a program: these are shown in their folder instead
-RUNNABLE_SUFFIXES = {
-    ".exe", ".com", ".bat", ".cmd", ".ps1", ".psm1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh",
-    ".msi", ".msp", ".scr", ".pif", ".hta", ".cpl", ".lnk", ".url", ".reg", ".jar", ".appref-ms",
-    ".sh", ".command", ".app", ".py", ".pyw",
-}
+# a link in a document opens with the system only when it is a document of a known kind;
+# anything else — a program, a script, an Office file with macros, a disk image, a type a
+# handler was registered for — is shown in its folder. A block list missed too much.
+VIEWER_OPENS = MD_SUFFIXES | {".txt", ".log", ".csv", ".json", ".yaml", ".yml", ".xml", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg",
+                              ".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp", ".rtf", ".mp3", ".mp4", ".wav", ".zip"}
+
+
+def link_action(target: Path) -> str:
+    """What a click on a local link does: "view" (the built-in viewer), "open" (the system
+    app), "folder" (shown in its folder, not opened) or "" (nothing there)."""
+    suffix = target.suffix.lower()
+    if target.is_file() and suffix in MD_SUFFIXES | {".txt"}:
+        return "view"
+    if not target.exists():
+        return ""
+    return "open" if target.is_file() and suffix in VIEWER_OPENS else "folder"
 
 
 def open_with_system(path: str | os.PathLike) -> None:
@@ -126,7 +136,7 @@ class FileViewer(tk.Toplevel):
         t.tag_configure("bold_italic", font=f["bold_italic"])
         t.tag_configure("strike", overstrike=True, foreground=palette.MUTED)
         t.tag_configure("code", font=f["code"], background=palette.CODE_BG, foreground=palette.CODE_TEXT)
-        t.tag_configure("link", foreground=palette.ACCENT, underline=True)
+        t.tag_configure("link", foreground=palette.LINK, underline=True)
         t.tag_bind("link", "<Enter>", lambda _e: t.config(cursor="hand2"))
         t.tag_bind("link", "<Leave>", lambda _e: t.config(cursor="arrow"))
         for level in (1, 2, 3, 4):
@@ -236,12 +246,13 @@ class FileViewer(tk.Toplevel):
             webbrowser.open(href)
             return
         target = (self.path.parent / href.split("#", 1)[0]).resolve()
-        if target.is_file() and target.suffix.lower() in MD_SUFFIXES | {".txt"}:
+        action = link_action(target)
+        if action == "view":
             FileViewer(self.master, target)
-        elif target.suffix.lower() in RUNNABLE_SUFFIXES and target.exists():
-            show_in_folder(target)
-        elif target.exists():
+        elif action == "open":
             open_with_system(target)
+        elif action == "folder":
+            show_in_folder(target)
 
     def _toggle_task(self, line: int) -> None:
         updated = toggle_task(self.source, line)

@@ -9,6 +9,7 @@ import time
 import tkinter as tk
 from tkinter import font as tkfont, ttk
 
+from .bookmarks import entry_login, entry_secret
 from .clipboard import CLEAR_SEC
 from .dialogs import BULLET, ask_text, ask_yes_no, show_info, show_warning
 from .fieldicons import summary as field_summary
@@ -66,8 +67,9 @@ class VaultPage(TabPage):
         super().__init__(app, parent)
 
     def build(self, frame: ttk.Frame) -> None:
-        paned = ttk.PanedWindow(frame, orient="horizontal")
+        paned = self.paned = ttk.PanedWindow(frame, orient="horizontal")
         paned.pack(fill="both", expand=True)
+        self._guarded_id: str | None = None  # the entry on the card when the guard came down
         self._build_sidebar(paned)
         self._build_card(paned)
         # the card keeps room for a field row (two lines when narrow): the sidebar gives way first
@@ -86,13 +88,46 @@ class VaultPage(TabPage):
         self.app.set_status(_("Entries: {n}").format(n=len(self.vault.entries)))
 
     def new_item(self) -> None:
-        self.new_entry()
+        self.app.security.require_secrets(self.new_entry)
 
     def focus_search(self) -> None:
-        self._search_entry.focus_set()
+        self.app.security.require_secrets(self._search_entry.focus_set)
+
+    def guard(self, on: bool) -> None:
+        """The tab behind its guard (lock_view.SecurityController): the list and the card
+        are taken off the screen and the card forgets its entry. A widget that is not on
+        the screen takes no focus and no key, and an emptied field holds no secret — the
+        guard screen over a live tab was walked round with Ctrl+F, Tab and Space.
+        `guard(False)` puts the list back and reopens the entry that was on the card."""
+        if on:
+            self._guarded_id = self.current.id if self.current is not None else None
+            self._search_later.cancel()
+            self.search_var.set("")
+            self._load_entry(None)
+            self.tree.delete(*self.tree.get_children())
+            self._visible = []
+            self.paned.pack_forget()
+            self.frame.focus_set()  # a field under the guard must not keep the keyboard
+            return
+        if not self.paned.winfo_manager():
+            self.paned.pack(fill="both", expand=True)
+        self.refresh_list()
+        again = self.vault.entry_by_id(self._guarded_id or "") if self.vault is not None else None
+        if again is not None:
+            self._load_entry(again)
+            self._select_in_tree(again)
+        else:
+            self.open_first()
+
+    @property
+    def guarded(self) -> bool:
+        return not self.paned.winfo_manager()
 
     def select_entry(self, entry: Entry) -> None:
         """Show `entry` on the card, switching to its list first (a bookmark tile's link)."""
+        if self.guarded:
+            self.app.security.require_secrets(lambda: self.select_entry(entry))
+            return
         if entry.group != self.group:
             self.group = entry.group
             self._refresh_group_widgets()
@@ -146,6 +181,13 @@ class VaultPage(TabPage):
         search.pack(fill="x")
         self._search_entry = search
         self._search_hint = Placeholder(search, hotkeys(_("🔍  Search  (Ctrl+F)")), WHITE, var=self.search_var, padx=13, hide_on_focus=False)
+        # the everyday flow without the mouse: type, Enter (the first hit is on the card),
+        # Ctrl+Shift+C — its password is copied; ↓ walks into the list, Esc clears the search
+        search.bind("<Return>", lambda _e: self._search_pick_first())
+        search.bind("<KP_Enter>", lambda _e: self._search_pick_first())
+        search.bind("<Down>", lambda _e: self._focus_list())
+        search.bind("<Escape>", lambda _e: self._clear_search())
+        Tooltip(search, hotkeys(_("Enter — the first hit onto the card, ↓ — into the list, Esc — clear.\nCtrl+Shift+C copies the password of the entry on the card, Ctrl+B its login.")))
 
         self.tree = ttk.Treeview(left, columns=("kind",), show="tree", selectmode="browse")
         self.tree.column("#0", stretch=True, width=150, minwidth=120)
@@ -154,6 +196,7 @@ class VaultPage(TabPage):
         self.tree.pack(fill="both", expand=True, pady=(12, 12))
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
         self.tree.bind("<Delete>", lambda _e: self.delete_entry())
+        self.tree.bind("<Escape>", lambda _e: self._clear_search())
         self.tree.bind("<Button-3>", self._show_context_menu)
 
         self._empty_hint = ttk.Label(left, text="", style="SidebarMuted.TLabel", justify="center")
@@ -267,6 +310,51 @@ class VaultPage(TabPage):
     def cancel_jobs(self) -> None:
         self._search_later.cancel()
 
+    def _filter_now(self) -> None:
+        """The list as the search field says, now — not after the typing pause."""
+        if self._search_later.pending:
+            self._search_later.flush()
+        else:
+            self.refresh_list()
+
+    def _search_pick_first(self) -> str:
+        """Enter in the search: the first hit goes onto the card; the focus stays in the search."""
+        self._filter_now()
+        if self._visible:
+            self._load_entry(self._visible[0])
+            self._select_in_tree(self._visible[0])
+        return "break"
+
+    def _focus_list(self) -> str:
+        """↓ in the search: into the list, on the entry of the card (the first hit when none)."""
+        self._filter_now()
+        if not self._visible:
+            return "break"
+        if self.current is None or all(e.id != self.current.id for e in self._visible):
+            self._load_entry(self._visible[0])
+            self._select_in_tree(self._visible[0])
+        if self.current is not None:
+            self.tree.focus(self.current.id)
+        self.tree.focus_set()
+        return "break"
+
+    def _clear_search(self) -> str:
+        """Esc in the search or the list: the whole list again, the cursor back in the search."""
+        if self.search_var.get():
+            self.search_var.set("")
+        self._search_entry.focus_set()
+        return "break"
+
+    def copy_field(self, kind: str) -> None:
+        """Ctrl+Shift+C / Ctrl+B: the password or the login of the entry on the card."""
+        if self.current is None or self.guarded:
+            return
+        value = entry_login(self.current) if kind == "login" else entry_secret(self.current)
+        if not value:
+            self.app.set_status(_("This entry has no login") if kind == "login" else _("This entry has no password"))
+            return
+        self.app.copy_to_clipboard(value, secret=kind != "login")
+
     def _entry_tip(self, iid: str) -> str:
         entry = self.vault.entry_by_id(iid) if self.vault is not None else None
         if entry is None:
@@ -275,7 +363,7 @@ class VaultPage(TabPage):
         return (entry.name or _("(untitled)")) + "\n" + entry.kind_label + "\n" + (_("Fields: {names}").format(names=", ".join(names)) if names else _("No filled fields"))
 
     def refresh_list(self) -> None:
-        if self.vault is None:
+        if self.vault is None or self.guarded:
             return
         query = self.search_var.get()
         self._visible = self.vault.search(query, self.group)
@@ -378,7 +466,7 @@ class VaultPage(TabPage):
         self.edited()
 
     def delete_entry(self) -> None:
-        if self.vault is None or self.current is None:
+        if self.vault is None or self.current is None or self.guarded:
             return
         if not ask_yes_no(self.app, _("Delete “{name}”?").format(name=self.current.name)):
             return
@@ -405,6 +493,8 @@ class VaultPage(TabPage):
             self.placeholder.place(relx=0.5, rely=0.45, anchor="center")
 
     def _load_entry(self, entry: Entry | None) -> None:
+        if entry is not None and self.guarded:
+            entry = None  # behind the guard the card shows nothing, whoever asks
         self._loading = True
         try:
             self.current = entry
@@ -432,11 +522,13 @@ class VaultPage(TabPage):
     def _build_field_row(self, row: int, f: Field) -> None:
         frame = self.fields_frame
         key_var = tk.StringVar(value=f.key)
-        val_var = tk.StringVar(value=f.value)
+        # a sealed value the file holds but the key cannot open (a damaged byte): said in the
+        # field, kept in the file; typing over it replaces it, Copy copies nothing
+        val_var = tk.StringVar(value=_("(unreadable value: restore a copy from Settings → Data)") if f.unreadable else f.value)
         secret_var = tk.BooleanVar(value=f.secret)
 
         key_entry = ttk.Entry(frame, textvariable=key_var, width=15, style="Key.TEntry", font=(FONT, pt(10)))
-        val_entry = ttk.Entry(frame, textvariable=val_var, width=10, show=BULLET if f.secret else "", font=(FONT, pt(11)))
+        val_entry = ttk.Entry(frame, textvariable=val_var, width=10, show=BULLET if f.secret and not f.unreadable else "", font=(FONT, pt(11)))
 
         def sync(*_):
             if self._loading:
@@ -460,9 +552,9 @@ class VaultPage(TabPage):
         Tooltip(eye, _("Show / hide value"))
 
         copy_btn = ttk.Button(
-            frame, text=_("Copy"), style="Small.TButton", command=lambda: self.app.copy_to_clipboard(val_var.get())
+            frame, text=_("Copy"), style="Small.TButton", command=lambda: self.app.copy_to_clipboard(f.value)
         )
-        Tooltip(copy_btn, _("To the clipboard; cleared after {n} s").format(n=CLEAR_SEC))
+        Tooltip(copy_btn, _("To the clipboard; cleared after {n} s").format(n=CLEAR_SEC) + ("\n" + hotkeys(_("Ctrl+Shift+C copies the password of the entry, Ctrl+B its login")) if f.secret else ""))
 
         gen = ttk.Button(frame, text="🎲", style="Icon.TButton", command=lambda: val_var.set(generate_password()))
         Tooltip(gen, _("Generate password"))
@@ -588,7 +680,7 @@ class VaultPage(TabPage):
         self.app.set_status(_("“{name}” → list “{group}”").format(name=entry.name, group=group or main_group_label()))
 
     def move_entry(self, delta: int) -> None:
-        if self.vault is None or self.current is None:
+        if self.vault is None or self.current is None or self.guarded:
             return
         if self.search_var.get().strip():
             self.app.set_status(_("Order changes in the list, not in search results"))
@@ -664,6 +756,7 @@ class VaultPage(TabPage):
         count = len(self.vault.search("", self.group))
         if not ask_yes_no(self.app, _("Delete list “{name}”?\nEntries in it: {n}. They will not be lost, they move to the main list.").format(name=self.group, n=count)):
             return
+        self.vault.backup_now()  # a deleted list cannot be undone after a lock: a copy first
         self.vault.remove_group(self.group)
         self.group = MAIN_GROUP
         self._refresh_group_widgets()

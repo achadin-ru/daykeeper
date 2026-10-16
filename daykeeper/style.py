@@ -15,6 +15,7 @@ from .palette import (
     ACCENT_INK,
     ACCENT_PRESSED,
     ACCENT_SOFT,
+    LINK,
     BG,
     BORDER,
     CARD,
@@ -156,8 +157,8 @@ def install(root: tk.Tk) -> theme.Painter:
     rounded("Small.TButton", 9, (RAISED, None, lift * 0.75), (RAISED_HOVER, None, lift * 0.75), (PRESSED, None, lift / 3))
     style.configure("Small.TButton", padding=(10 + lift * 0.75, 5 + lift * 0.75), font=(FONT, pt(BUTTON_SIZE - 1)), background=CARD)
     rounded("Link.TButton", 6, none, (ACCENT_SOFT, None), (ACCENT_SOFT, None))
-    style.configure("Link.TButton", foreground=ACCENT, padding=(6, 5), background=CARD)
-    style.map("Link.TButton", foreground=[("active", ACCENT_HOVER)])
+    style.configure("Link.TButton", foreground=LINK, padding=(6, 5), background=CARD)
+    style.map("Link.TButton", foreground=[("active", LINK)])
     rounded("Danger.TButton", 10, (RAISED, None, lift), (DANGER_HOVER, None, lift), (DANGER_SOFT, None, lift / 2))
     style.configure("Danger.TButton", foreground=DANGER, padding=(12 + lift, 8 + lift), background=SIDEBAR, font=(FONT, pt(BUTTON_SIZE)))
     # the corners of the rounded box already pad the label by radius + lift, so the sidebar

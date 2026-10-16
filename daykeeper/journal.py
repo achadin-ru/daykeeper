@@ -8,6 +8,7 @@ items by day (`inbox.py` in the project root is the writer)."""
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import time
@@ -16,7 +17,7 @@ from pathlib import Path
 
 from .i18n import _
 from .journal_layout import ALIASES, ROLE_MR, ROLE_NOTE, ROLE_PLAIN, ROLE_TESTS, current as current_layout, known_kind, resolve_known, role_of
-from .settings import Links, private
+from .settings import Links, private, readable
 
 _links = Links()  # tracker and GitLab addresses; the app sets them from settings.json (`configure`)
 ISSUE_KEY_RE = re.compile(r"\b([A-Z][A-Z0-9]+-\d+)\b")
@@ -178,7 +179,7 @@ class Day:
         return [a for a in self.activities if a["kind"] not in shown]
 
     def auto_summary(self) -> str:
-        """Phrase for «1.» when there is no own one: «RFT, reviewed MRs, new manual/autotests,
+        """Phrase for «1.» when there is no own one: «tested tasks, reviewed MRs, new manual/autotests,
         nightly run triage» — the column and activity phrases of the layout, then the notes of
         the day, each as it was written."""
         layout = current_layout()
@@ -358,11 +359,31 @@ def append_inbox(path: Path, status: str, items: list[str], date: str | None = N
     if not rows:
         return 0
     path.parent.mkdir(parents=True, exist_ok=True)
+    # a lone surrogate (an odd file name pasted into a note) becomes U+FFFD: the line is
+    # written, not a traceback in the hook or the console
     with open(path, "a", encoding="utf-8", newline="\n") as fh:
         for row in rows:
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+            fh.write(readable(json.dumps(row, ensure_ascii=False)) + "\n")
     private(path)
     return len(rows)
+
+
+def claim_inbox(path: Path) -> list[Path]:
+    """Move the inbox aside under a name no writer uses, so what a writer appends while
+    the app reads and saves goes to a fresh inbox instead of being deleted unread with
+    it. The rename is atomic (NTFS and POSIX); when a writer holds the file open at that
+    moment (Windows refuses the rename), nothing is claimed and the next pull tries again.
+    Returns the files to read, a claim left by a crash between claim and save first."""
+    folder = path.parent
+    claimed = sorted(folder.glob(path.name + ".*")) if folder.is_dir() else []
+    if path.exists():
+        target = path.with_name(f"{path.name}.{os.getpid()}-{time.time_ns()}")
+        try:
+            os.replace(path, target)
+        except OSError:
+            return claimed
+        claimed.append(target)
+    return claimed
 
 
 def read_inbox(path: Path) -> list[InboxItem]:

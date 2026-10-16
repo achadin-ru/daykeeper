@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import subprocess
@@ -29,7 +30,7 @@ from .lock_view import SecurityController, strength_text
 from .notes_view import NotesPage
 from .palette import ACCENT, APP_TITLE, CARD, FONT, RAIL, RAIL_HOVER, pt
 from .routines_view import RoutineRuns, RoutinesPage
-from .session import Session
+from .session import Session, remove_preview_copy
 from . import style
 from .settings_view import SettingsWindow
 from .tabpage import RESIZE_SETTLE_MS, ChunkBuilder, TabPage
@@ -121,12 +122,35 @@ class App(tk.Tk):
         self._inbox_ticker.start()
         refresh_helper_in_background()  # a connected Claude Code hook gets this build's helper
         self.show_unlock()
-        self.after(10, lambda: theme.caption_colour(self, RAIL, "#FFFFFF"))
+        self._after_jobs: list[str] = [self.after(10, lambda: theme.caption_colour(self, RAIL, "#FFFFFF"))]  # raw timers, cancelled by destroy
         # every other window (settings, dialogs, an opened file): the title bar in the colours
         # of the theme, once it is on screen — set before that, Windows paints it its own way
         self.bind_class("Toplevel", "<Map>", self._paint_caption, add="+")
         # painted after the cards took their new width (RESIZE_SETTLE_MS), so once
         self._quiet_resize = theme.QuietResize(self, lambda: self._content, RESIZE_SETTLE_MS + 80, self._pin_view, self._unpin_view)
+
+    def destroy(self) -> None:
+        """Every timer first: a job firing after the window was destroyed printed
+        `invalid command name "…_tick"` to the console (and hid real errors in the tests)."""
+        for job in (self._save, self._capture, self._clip_wipe, self._tabs_fit, self._dpi_check, self._hide_views):
+            job.cancel()
+        for raw in getattr(self, "_after_jobs", ()):
+            try:
+                self.after_cancel(raw)
+            except tk.TclError:
+                pass
+        self._inbox_ticker.stop()
+        tickers = [getattr(getattr(self, "security", None), "ticker", None), getattr(getattr(self, "gitlab", None), "_gl_ticker", None), getattr(getattr(self, "gitlab", None), "_gl_drainer", None)]
+        tickers += list(getattr(getattr(self, "runs", None), "tickers", ()))
+        for ticker in tickers:
+            if ticker is not None:
+                ticker.stop()
+        quiet = getattr(self, "_quiet_resize", None)
+        if quiet is not None:
+            quiet.thaw.cancel()
+        if self._root_frame is not None:
+            self._cancel_view_jobs()
+        super().destroy()
 
     def report_callback_exception(self, exc_type, exc, tb) -> None:
         """An error in a click or a timer: into errors.log next to the vault, and a short
@@ -140,7 +164,7 @@ class App(tk.Tk):
         self._error_told = now
         text = _("Something went wrong: {error}").format(error=f"{exc_type.__name__}: {exc}"[:300])
         if written:
-            text += "\n\n" + _("The details are in:\n{path}").format(path=path)
+            text += "\n\n" + _("The details are in:\n{path}").format(path=path) + "\n" + _("If it keeps happening, send that file with a bug report; it holds no passwords.")
         show_error(self, text)
 
     def _paint_caption(self, event: tk.Event) -> None:
@@ -317,6 +341,10 @@ class App(tk.Tk):
         """Ctrl+letter in any keyboard layout: app shortcuts and text editing (paste, copy…)."""
         if 49 <= event.keycode <= 57 and self.vault is not None:  # Ctrl+1…9: the tabs in their order
             self.show_tab_number(event.keycode - 48)
+            return "break"
+        if event.keycode in (66, 67) and self.vault is not None and self.mode == "vault" and (event.keycode == 66 or event.state & 0x1):
+            # Ctrl+B / Ctrl+Shift+C on the Passwords tab: the login / the password of the entry on the card
+            self.pages["vault"].copy_field("login" if event.keycode == 66 else "secret")
             return "break"
         if event.keycode in (90, 89) and self.vault is not None and not isinstance(self.focus_get(), tk.Text):
             # Z / Y in any layout (a text box undoes its typing itself)
@@ -498,6 +526,10 @@ class App(tk.Tk):
                 return
         if self._opening:
             return
+        wait = self.security.attempts.wait(time.monotonic())  # the same 1-2-4 s pause as the PIN prompt
+        if wait:
+            self._unlock_err.config(text=_("Too many wrong tries. Wait {n} s").format(n=math.ceil(wait)))
+            return
         # the key is derived on a thread: Argon2 takes a tenth of a second here and more on
         # a slow laptop, and the window must keep painting meanwhile
         self._opening = True
@@ -528,6 +560,7 @@ class App(tk.Tk):
             if not self._unlock_err.winfo_exists():  # the screen was made again meanwhile (language)
                 return
             if isinstance(error, WrongPassword):
+                self.security.attempts.fail(time.monotonic())
                 self._unlock_err.config(text=_("Wrong password"))
                 self._pw1.delete(0, "end")
             elif isinstance(error, BadFile):
@@ -546,7 +579,7 @@ class App(tk.Tk):
         self.security.attempts.ok()  # the master password itself was given
         self.unbind("<Return>")
         self.show_main()
-        self.after(800, lambda: self.vault is not None and self.runs.on_unlock())
+        self._after_jobs.append(self.after(800, lambda: self.vault is not None and self.runs.on_unlock()))
 
     def lock(self) -> None:
         """Save, forget the vault and show the unlock screen (Ctrl+L, idle, minimize)."""
@@ -622,6 +655,8 @@ class App(tk.Tk):
             self.bind(f"<{MOD_KEY}-f>", lambda _e: self.pages["vault"].focus_search())
             self.bind(f"<{MOD_KEY}-e>", lambda _e: self.export_dialog())
             self.bind(f"<{MOD_KEY}-r>", lambda _e: self.page("journal").report_dialog())
+            self.bind(f"<{MOD_KEY}-b>", lambda _e: self.mode == "vault" and (self.pages["vault"].copy_field("login"), "break")[1])
+            self.bind(f"<{MOD_KEY}-Shift-C>", lambda _e: self.mode == "vault" and (self.pages["vault"].copy_field("secret"), "break")[1])
             for seq, again in ((f"<{MOD_KEY}-z>", False), (f"<{MOD_KEY}-Z>", True), (f"<{MOD_KEY}-y>", True)):
                 self.bind(seq, lambda e, r=again: None if isinstance(self.focus_get(), tk.Text) else (self.undo_key(r), "break")[1])
         if sys.platform != "win32":
@@ -637,7 +672,7 @@ class App(tk.Tk):
         self.bind("<Alt-Down>", lambda _e: self.pages["vault"].move_entry(+1))
         self.pages["vault"].open_first()
         self.pull_inbox()
-        self.history = History(self.vault.domain_state, UNDO_DOMAINS)
+        self.history = History(self.vault.object_states, UNDO_DOMAINS)
         self.history.reset()
         self._update_undo_buttons()
 
@@ -962,7 +997,7 @@ class App(tk.Tk):
         self._capture.cancel()
         self.focus_set()  # a field being typed into would write its old text back over the undo
         self.update_idletasks()
-        touched = (self.history.redo if redo else self.history.undo)(self.vault.set_domain_state)
+        touched = (self.history.redo if redo else self.history.undo)(self.vault.set_object_state)
         self._update_undo_buttons()
         if not touched:
             self.set_status(_("Nothing to redo") if redo else _("Nothing to undo"))
@@ -991,6 +1026,7 @@ class App(tk.Tk):
         if name == "vault":
             again = next((e for e in self.vault.entries if keep is not None and e.id == keep.id), None)
             page.select_entry(again) if again is not None else page.open_first()
+            self.security.restore_guard()  # locked passwords stay locked on the new tab
         if self.mode == name:
             self.show_page(name)
 
@@ -1009,7 +1045,7 @@ class App(tk.Tk):
                 self._conflict_told = True
                 show_error(self, _("Could not save:\n{error}").format(error=exc))
             return "conflict"
-        except OSError as exc:
+        except (OSError, ValueError) as exc:  # ValueError: the content could not be serialised
             show_error(self, _("Could not save:\n{error}").format(error=exc))
             return "error"
         return "ok"
@@ -1029,12 +1065,15 @@ class App(tk.Tk):
             self._tk_clip_put(value)
             self.set_status(_("Copied"))
             return
+        if not self.security.secrets_open():  # the last line of the guard: no secret leaves while the tab is locked
+            self.set_status(_("Passwords are locked"))
+            return
         self._clip.put(value)
-        self._clip_wipe.touch(value)
+        self._clip_wipe.touch(self._clip.digest(value))  # the timer holds a hash, not the password, for the 30 s
         self.set_status(_("Copied. In {n} s the password is wiped from the clipboard").format(n=CLEAR_SEC))
 
-    def _clear_clipboard(self, expected: str) -> None:
-        if self._clip.wipe_if(expected):
+    def _clear_clipboard(self, digest: str) -> None:
+        if self._clip.wipe_if_digest(digest):
             self.set_status(_("The copied password was wiped from the clipboard"))
 
     # the window's own clipboard: what SecretClipboard falls back on outside Windows
@@ -1090,6 +1129,8 @@ def main() -> None:
     if getattr(sys, "frozen", False):
         _refresh_autostart(app)
     app.mainloop()
+    if "--preview" in sys.argv[1:]:
+        remove_preview_copy(app.vault_path)  # the duplicate made for the look goes with the window
     # a site icon or a GitLab check may still be waiting on the network; the window is gone
     # and everything is saved, so the process does not wait for them
     if any(t.is_alive() and not t.daemon for t in threading.enumerate() if t is not threading.main_thread()):

@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 from .i18n import variants
+from .settings import number
 
 # Tile colours: (code, UI label key, colour of the avatar). "" — the colour of the site,
 # blue until the site has told it.
@@ -211,15 +212,15 @@ class Bookmark:
             color=color if color in TILE_COLOR else "",
             entry_id=str(d.get("entry_id", "")),
             note=str(d.get("note", "")),
-            order=int(d.get("order", 0)),
+            order=number(int, d.get("order", 0), 0),
             id=str(d.get("id") or _new_id()),
-            created=float(d.get("created", time.time())),
-            opened=float(d.get("opened", 0.0)),
+            created=number(float, d.get("created"), None) or time.time(),
+            opened=number(float, d.get("opened", 0.0), 0.0),
             favicon=str(d.get("favicon", "")),
             site_colour=str(d.get("site_colour", "")) if re.fullmatch(r"#[0-9A-Fa-f]{6}", str(d.get("site_colour", ""))) else "",
-            site_checked=float(d.get("site_checked", 0.0)),
+            site_checked=number(float, d.get("site_checked", 0.0), 0.0),
             favicon_small=str(d.get("favicon_small", "")),
-            favicon_small_px=int(d.get("favicon_small_px", 0) or 0),
+            favicon_small_px=number(int, d.get("favicon_small_px", 0) or 0, 0),
         )
 
 

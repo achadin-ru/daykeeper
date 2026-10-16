@@ -15,10 +15,13 @@ No tkinter here: the logic is unit-tested on temporary folders."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import re
 import shutil
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -159,7 +162,12 @@ def install_helper(src: Path | None = None, bin_dir: Path | None = None) -> bool
 
 
 def quote(path: str) -> str:
-    return f'"{path}"' if any(c in path for c in " &()") else path
+    """A path as the shell that runs the hook reads it: left alone when it is plain path
+    characters, else in double quotes with what means something inside them escaped
+    (`"`, `$`, a backtick, a backslash — bash; cmd leaves them alone inside quotes)."""
+    if re.fullmatch(r"[A-Za-z0-9_./:+=,@-]+", path):
+        return path
+    return '"' + re.sub(r'(["$`\\])', r"\\\1", path) + '"'
 
 
 def hook_command(parts: list[str] | None = None) -> str:
@@ -227,34 +235,75 @@ def _without_ours(data: dict) -> dict:
     return data
 
 
-def _write(path: Path, data: dict) -> None:
+LOCK_SUFFIX = ".daykeeper-lock"
+LOCK_STALE_SEC = 30  # a lock older than this was left by a crash
+
+
+@contextlib.contextmanager
+def _locked(path: Path):
+    """A lock file beside settings.json for the moment of read-change-write: two copies of
+    the app (or the app and its preview) do not overwrite each other's edit. Claude Code
+    does not know the lock, so the re-read happens inside it, right before the rename —
+    the window for its own write to be lost is the rename itself."""
+    lock = path.with_name(path.name + LOCK_SUFFIX)
+    fd = None
+    for _attempt in range(50):
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime > LOCK_STALE_SEC:
+                    lock.unlink()
+                    continue
+            except OSError:
+                pass
+            time.sleep(0.02)
+    try:
+        yield
+    finally:
+        if fd is not None:
+            os.close(fd)
+            lock.unlink(missing_ok=True)
+
+
+def _write(path: Path, change) -> None:
+    """Read the file afresh, apply `change(data) -> data` and write the result atomically,
+    all under the lock: an edit made meanwhile by Claude Code or another window is
+    merged, not thrown away. A one-time copy of the user's file is kept before the first edit."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    backup = path.with_name(path.name + BACKUP_SUFFIX)
-    if path.exists() and not backup.exists():
-        shutil.copy2(path, backup)  # the user's file as it was before we ever touched it
-    tmp = path.with_name(path.name + ".daykeeper-tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    with _locked(path):
+        data = change(_read(path))
+        backup = path.with_name(path.name + BACKUP_SUFFIX)
+        if path.exists() and not backup.exists():
+            shutil.copy2(path, backup)  # the user's file as it was before we ever touched it
+        tmp = path.with_name(path.name + ".daykeeper-tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
 
 
-def connect(path: Path | None = None, command: str | None = None) -> None:
-    """Add our hook (an older entry of ours is replaced). Raises SettingsBroken, OSError."""
-    path = path or settings_file()
-    data = _without_ours(_read(path))
+def _with_ours(data: dict, command: str | None) -> dict:
+    data = _without_ours(data)
     hooks = data.setdefault("hooks", {})
     if not isinstance(hooks, dict):
         raise SettingsBroken("hooks is not an object")
     hooks.setdefault("PostToolUse", []).append(
         {"matcher": MATCHER, "hooks": [{"type": "command", "command": command or hook_command(), "timeout": HOOK_TIMEOUT}]}
     )
-    _write(path, data)
+    return data
+
+
+def connect(path: Path | None = None, command: str | None = None) -> None:
+    """Add our hook (an older entry of ours is replaced). Raises SettingsBroken, OSError."""
+    path = path or settings_file()
+    _with_ours(_read(path), command)  # a broken file is refused before anything is touched
+    _write(path, lambda data: _with_ours(data, command))
 
 
 def disconnect(path: Path | None = None) -> None:
     path = path or settings_file()
-    data = _read(path)
-    if our_commands(data):
-        _write(path, _without_ours(data))
+    if our_commands(_read(path)):
+        _write(path, _without_ours)
 
 
 # ---- CLAUDE.md
@@ -298,8 +347,11 @@ def example(word: str) -> tuple[str, str]:
     if word in _EXAMPLES and ident in ("ok", "failed", "bugs", "review", "mr_open", "mr_merged", "manual", "auto", "note"):
         return _EXAMPLES[word]
     if where == "column":
-        return f"{word} APP-1234", f"{layout.column(ident).label} (issue keys or short items)"
+        column = layout.column(ident)
+        return f"{word} APP-1234", f"{column.label if column else ident} (issue keys or short items)"
     kind = layout.kind(ident)
+    if kind is None:
+        return f'{word} "…"', ident
     sample = {ROLE_MR: "!42", ROLE_TESTS: "APP-101", ROLE_NOTE: '"what was done, one sentence"'}.get(kind.role, '"…"')
     return f"{word} {sample}", kind.label
 

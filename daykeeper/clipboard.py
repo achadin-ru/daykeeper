@@ -10,6 +10,7 @@ through Tk; the app still clears it after a delay.
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import sys
 
 CF_UNICODETEXT = 13
@@ -158,9 +159,23 @@ class SecretClipboard:
     clipboard (`fallback_put`, `fallback_get`, `fallback_clear` — Tk) does it, and the
     text is still wiped after the delay. The delay itself is the caller's timer."""
 
-    def __init__(self, fallback_put, fallback_get, fallback_clear, put=put_secret, clear_if=clear_if):
+    def __init__(self, fallback_put, fallback_get, fallback_clear, put=put_secret, clear_if=clear_if, read=read_text):
         self._fallback_put, self._fallback_get, self._fallback_clear = fallback_put, fallback_get, fallback_clear
-        self._put, self._clear_if = put, clear_if
+        self._put, self._clear_if, self._read = put, clear_if, read
+
+    @staticmethod
+    def digest(text: str) -> str:
+        """What the wipe timer keeps instead of the secret itself: a hash of the copied text."""
+        return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+
+    def wipe_if_digest(self, digest: str) -> bool:
+        """Empty the clipboard if what it holds hashes to `digest`; True when it was wiped."""
+        text = self._read()
+        if text is None:
+            text = self._fallback_get()
+        if text is None or self.digest(text) != digest:
+            return False
+        return self.wipe_if(text)
 
     def put(self, text: str) -> bool:
         """Copy `text`. True — hidden from the clipboard history; False — put plainly."""

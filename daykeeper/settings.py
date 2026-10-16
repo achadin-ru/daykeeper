@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -50,6 +51,25 @@ def settings_path_for(vault_path: Path) -> Path:
     return Path(vault_path).parent / SETTINGS_NAME
 
 
+_SURROGATES = re.compile("[\ud800-\udfff]")
+
+
+def number(kind, value, default):
+    """A number from a file edited by hand or written by another version: a wrong type or
+    shape gives the default, not an import that dies on a TypeError."""
+    try:
+        return kind(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def readable(text: str) -> str:
+    """Text for a plain file (settings.json, the inbox, an export): an unpaired surrogate
+    — Python keeps one in a str, strict UTF-8 refuses it — becomes U+FFFD, so the file is
+    written, stays valid UTF-8 and reads back. The vault itself carries them through."""
+    return _SURROGATES.sub("\ufffd", text)
+
+
 def read_settings(path: Path) -> dict:
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -74,7 +94,11 @@ def write_settings(path: Path, data: dict) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         private(path.parent, folder=True)
     tmp = path.with_suffix(path.suffix + ".tmp")  # a crash mid-write must not leave half a file
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    # fsync before the rename: a power loss right after left an empty settings.json (read as {})
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(readable(json.dumps(data, ensure_ascii=False, indent=2)))
+        fh.flush()
+        os.fsync(fh.fileno())
     private(tmp)
     os.replace(tmp, path)
 

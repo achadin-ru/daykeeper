@@ -66,9 +66,7 @@ def dpi_at(x: int, y: int) -> int:
     if not IS_WINDOWS:
         return 0
     try:
-        from ctypes import wintypes
-
-        monitor = ctypes.windll.user32.MonitorFromPoint(wintypes.POINT(x, y), 2)  # MONITOR_DEFAULTTONEAREST
+        monitor = ctypes.windll.user32.MonitorFromPoint(_Point(x, y), _MONITOR_DEFAULTTONEAREST)
         dx, dy = ctypes.c_uint(), ctypes.c_uint()
         if ctypes.windll.shcore.GetDpiForMonitor(monitor, 0, ctypes.byref(dx), ctypes.byref(dy)) != 0:
             return 0
@@ -103,16 +101,16 @@ def virtual_screen() -> tuple[int, int, int, int] | None:
         return None
 
 
+class _Point(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+
 class _Rect(ctypes.Structure):
     _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long), ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
 
 
 class _MonitorInfo(ctypes.Structure):
     _fields_ = [("cbSize", ctypes.c_ulong), ("rcMonitor", _Rect), ("rcWork", _Rect), ("dwFlags", ctypes.c_ulong)]
-
-
-class _Point(ctypes.Structure):
-    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 
 
 def work_area_at(x: int, y: int) -> tuple[int, int, int, int] | None:
@@ -122,8 +120,6 @@ def work_area_at(x: int, y: int) -> tuple[int, int, int, int] | None:
         return None
     try:
         user32 = ctypes.windll.user32
-        user32.MonitorFromPoint.restype = ctypes.c_void_p
-        user32.GetMonitorInfoW.argtypes = (ctypes.c_void_p, ctypes.POINTER(_MonitorInfo))
         monitor = user32.MonitorFromPoint(_Point(x, y), _MONITOR_DEFAULTTONEAREST)
         info = _MonitorInfo()
         info.cbSize = ctypes.sizeof(_MonitorInfo)
@@ -231,3 +227,45 @@ def mouse_held() -> bool:
         return bool(ctypes.windll.user32.GetAsyncKeyState(0x01) & 0x8000)
     except (AttributeError, OSError):
         return False
+
+
+def _declare() -> None:
+    """Argument and result types for every call above, once at import. Without them ctypes
+    passes a window handle above 2^31 as a negative 32-bit int on x64, and the call
+    silently does nothing for such a window (caption colours, DPI, flashing). A function
+    an older Windows does not have is skipped; its caller already falls back."""
+    if not IS_WINDOWS:
+        return
+    from ctypes import wintypes
+
+    user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+    signatures: list[tuple] = [
+        (user32, "GetAncestor", [wintypes.HWND, wintypes.UINT], wintypes.HWND),
+        (user32, "GetDpiForWindow", [wintypes.HWND], wintypes.UINT),
+        (user32, "SetProcessDpiAwarenessContext", [ctypes.c_void_p], wintypes.BOOL),
+        (user32, "MonitorFromPoint", [_Point, wintypes.DWORD], ctypes.c_void_p),
+        (user32, "GetSystemMetrics", [ctypes.c_int], ctypes.c_int),
+        (user32, "GetMonitorInfoW", [ctypes.c_void_p, ctypes.POINTER(_MonitorInfo)], wintypes.BOOL),
+        (user32, "FlashWindowEx", [ctypes.c_void_p], wintypes.BOOL),
+        (user32, "SendMessageW", [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM], ctypes.c_ssize_t),
+        (user32, "RedrawWindow", [wintypes.HWND, ctypes.c_void_p, ctypes.c_void_p, wintypes.UINT], wintypes.BOOL),
+        (user32, "GetAsyncKeyState", [ctypes.c_int], ctypes.c_short),
+        (kernel32, "GetOEMCP", [], wintypes.UINT),
+        (kernel32, "GetUserDefaultUILanguage", [], ctypes.c_ushort),
+    ]
+    for dll_name, name, args, result in (("shcore", "SetProcessDpiAwareness", [ctypes.c_int], ctypes.c_long),
+                                         ("shcore", "GetDpiForMonitor", [ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint)], ctypes.c_long),
+                                         ("dwmapi", "DwmSetWindowAttribute", [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD], ctypes.c_long)):
+        try:
+            signatures.append((getattr(ctypes.windll, dll_name), name, args, result))
+        except _FAILURES:
+            pass
+    for dll, name, args, result in signatures:
+        try:
+            fn = getattr(dll, name)
+            fn.argtypes, fn.restype = args, result
+        except _FAILURES:
+            pass
+
+
+_declare()

@@ -86,7 +86,7 @@ class HookClassifyTest(unittest.TestCase):
             body = Path(tmp) / "comment.json"
             body.write_text('{"body":{"type":"doc","content":[{"text":"Tested on dev qa. Works correctly."}]}}', encoding="utf-8")
             cmd = f'curl -X POST ".../rest/api/3/issue/APP-202/comment" --data-binary @{body}'
-            self.assertEqual(hook.classify(bash(cmd, '{"id":"2"}')), [("pass", "APP-202")])
+            self.assertEqual(hook.classify({**bash(cmd, '{"id":"2"}'), "cwd": tmp}), [("pass", "APP-202")])  # the file is in the command's folder
         # an ordinary comment without the verdict head — not an event
         self.assertEqual(hook.classify(bash('curl -X POST ".../rest/api/3/issue/APP-1/comment" -d \'{"body":"A question about the steps"}\'', "")), [])
 

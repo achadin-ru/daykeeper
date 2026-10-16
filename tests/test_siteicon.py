@@ -220,7 +220,8 @@ class ShortcutTest(unittest.TestCase):
     def test_an_unreadable_shortcut_is_started_by_windows_and_waited_for(self):
         r = Routine(name="App", kind="script", target=r"C:\x\app.lnk")
         plan = launch_plan(r, platform="win32", exists=lambda _p: True, shortcut=lambda _p: None)
-        self.assertEqual(plan.argv[:5], ["cmd", "/c", "start", '""', "/wait"])
+        self.assertIsNone(plan.argv)
+        self.assertTrue(plan.shell.startswith('start "" /wait "'), plan.shell)  # quoted: a name with & is one path to cmd
 
     def test_a_script_runner_alone_is_refused(self):
         r = Routine(name="PS", kind="script", target=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")

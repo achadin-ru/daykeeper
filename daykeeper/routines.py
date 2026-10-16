@@ -8,6 +8,7 @@ tkinter); the tab runs what `launch_plan` describes.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import secrets
@@ -19,6 +20,8 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+
+from .settings import number
 
 KINDS = ("script", "command", "url", "folder", "file")
 KIND_ICONS = {"script": "📜", "command": "⌨", "url": "🌐", "folder": "📁", "file": "📄"}
@@ -94,6 +97,10 @@ class Routine:
     id: str = field(default_factory=_new_id)
     last_run: float = 0.0
     last_code: int | None = None  # exit code of the last run; None — still running or unknown
+    # sha256 of the script file (and of the .lnk target) as it was when the user last saved the
+    # tile or ran it by hand: an automatic run starts only the version the user accepted —
+    # the vault authenticates the path, this authenticates the content
+    target_hash: str = ""
 
     def avatar(self) -> str:
         return self.icon.strip()[:2] or KIND_ICONS.get(self.kind, "▶")
@@ -112,6 +119,7 @@ class Routine:
             "id": self.id, "name": self.name, "kind": self.kind, "target": self.target, "args": self.args,
             "cwd": self.cwd, "terminal": self.terminal, "icon": self.icon, "color": self.color,
             "schedule": self.schedule.to_dict(), "order": self.order, "last_run": self.last_run, "last_code": self.last_code,
+            "target_hash": self.target_hash,
         }
 
     @classmethod
@@ -122,8 +130,8 @@ class Routine:
             name=str(d.get("name", "")), kind=kind if kind in KINDS else "script", target=str(d.get("target", "")),
             args=str(d.get("args", "")), cwd=str(d.get("cwd", "")), terminal=bool(d.get("terminal", False)),
             icon=str(d.get("icon", "")), color=str(d.get("color", "")), schedule=Schedule.from_dict(d.get("schedule")),
-            order=int(d.get("order", 0)), id=str(d.get("id") or _new_id()), last_run=float(d.get("last_run", 0.0) or 0.0),
-            last_code=int(code) if isinstance(code, int) else None,
+            order=number(int, d.get("order"), 0), id=str(d.get("id") or _new_id()), last_run=number(float, d.get("last_run"), 0.0),
+            last_code=int(code) if isinstance(code, int) else None, target_hash=str(d.get("target_hash") or ""),
         )
 
 
@@ -186,6 +194,75 @@ class Routines:
     @classmethod
     def from_list(cls, rows) -> Routines:
         return cls([Routine.from_dict(x) for x in rows or [] if isinstance(x, dict)])
+
+
+# ---- the accepted script
+
+SCRIPT_UNKNOWN, SCRIPT_CHANGED, SCRIPT_UNREADABLE = "unknown", "changed", "unreadable"
+
+
+def script_digest(r: Routine, shortcut=None) -> str | None:
+    """sha256 of what a script routine runs: the file at the target and, for a shortcut,
+    the file it points to. None when there is nothing to hash — another kind of routine
+    (a command is text inside the vault; a link, a folder, a file open by their program),
+    or a file that cannot be read."""
+    if r.kind != "script":
+        return None
+    target = r.target.strip()
+    paths = [target]
+    if target.lower().endswith(".lnk"):
+        sc = (shortcut or resolve_shortcut)(target)
+        if sc is not None:
+            paths.append(sc.target)
+    h = hashlib.sha256()
+    for p in paths:
+        try:
+            h.update(Path(p).read_bytes())
+        except OSError:
+            return None
+        h.update(b"\0")
+    return h.hexdigest()
+
+
+def check_script(r: Routine, shortcut=None) -> str:
+    """"" when the script is the one the user accepted; SCRIPT_UNKNOWN when none was
+    accepted yet (a tile from before this check, or never run), SCRIPT_CHANGED when the file
+    differs from the accepted one, SCRIPT_UNREADABLE when it cannot be read."""
+    if r.kind != "script":
+        return ""
+    digest = script_digest(r, shortcut)
+    if digest is None:
+        return SCRIPT_UNREADABLE
+    if not r.target_hash:
+        return SCRIPT_UNKNOWN
+    return "" if digest == r.target_hash else SCRIPT_CHANGED
+
+
+def accept_script(r: Routine, shortcut=None) -> None:
+    """The user saved the tile or ran it by hand: the file as it is now is the accepted one."""
+    r.target_hash = script_digest(r, shortcut) or ""
+
+
+def risky_location(path: str, home: Path | None = None) -> str:
+    """Where a script may be swapped by someone else: "share" for a network path,
+    "downloads" for the Downloads folder, "outside" for a file outside the user's profile;
+    "" for a file under the profile."""
+    p = path.strip().strip("\"'")
+    if not p:
+        return ""
+    if p.startswith(("\\\\", "//")):
+        return "share"
+    home = home or Path.home()
+    try:
+        full = Path(p).resolve()
+        home = home.resolve()
+    except OSError:
+        return ""
+    if full == home / "Downloads" or (home / "Downloads") in full.parents:
+        return "downloads"
+    if full != home and home not in full.parents:
+        return "outside"
+    return ""
 
 
 @dataclass
@@ -323,7 +400,8 @@ def _shortcut_plan(r: Routine, target: str, platform: str, which, shortcut) -> L
     sc = shortcut(target)
     if sc is None:
         if platform == "win32":  # unreadable: let Windows start it, and still wait for it
-            return LaunchPlan("run", argv=["cmd", "/c", "start", '""', "/wait", target], cwd=str(Path(target).parent))
+            # through the shell with the path quoted: as a bare argument, `a&b.lnk` was two commands to cmd
+            return LaunchPlan("run", shell=f'start "" /wait "{target}"', cwd=str(Path(target).parent))  # noqa: S604 — the user's own shortcut from the vault, quoted
         return None
     if Path(sc.target).suffix.lower() not in RUNNABLE:
         return None  # a shortcut to a document or a folder: just open it

@@ -5,15 +5,61 @@ No tkinter: tested on a temporary folder."""
 from __future__ import annotations
 
 import json
+import shutil
+import tempfile
 import time
 from pathlib import Path
 
 from .export import export_csv, export_text
 from .i18n import _, detect_system_language
-from .journal import clear_inbox, inbox_path_for, merge_inbox, read_inbox
+from .journal import claim_inbox, inbox_path_for, merge_inbox, read_inbox
 from .revisions import Revisions
-from .settings import Links, read_settings, settings_path_for, write_settings
+from .settings import Links, read_settings, readable, settings_path_for, write_settings
 from .vault import MAGICS, Vault, default_vault_path, write_private
+
+STALE_TMP_SEC = 60  # a `.tmp` of a write older than this is a crash's leftover, not a write under way
+COPY_PREFIX = "daykeeper-copy-"  # the temp folder of a copy opened for a look (Settings → Data → Copies → Open)
+COPY_SWEEP_SEC = 24 * 3600  # a copy folder older than this was left by a crash: swept at the next Open
+
+
+def is_preview_copy(vault_path: Path, tempdir: Path | None = None) -> bool:
+    """The vault sits in a `daykeeper-copy-*` folder right under the temp directory: a
+    duplicate made for a look, and nothing to keep once the look is over."""
+    folder = Path(vault_path).parent
+    try:
+        base = (tempdir or Path(tempfile.gettempdir())).resolve()
+        return folder.name.startswith(COPY_PREFIX) and folder.resolve().parent == base
+    except OSError:
+        return False
+
+
+def remove_preview_copy(vault_path: Path, tempdir: Path | None = None) -> bool:
+    """Delete the temp folder of a copy opened for a look (its vault, settings and log);
+    True when it was one. The preview process calls this when its window closes."""
+    if not is_preview_copy(vault_path, tempdir):
+        return False
+    shutil.rmtree(Path(vault_path).parent, ignore_errors=True)
+    return True
+
+
+def sweep_preview_copies(tempdir: Path | None = None, older_than: float = COPY_SWEEP_SEC, now: float | None = None) -> int:
+    """Remove `daykeeper-copy-*` folders older than `older_than` seconds (a preview that
+    crashed never removed its own); the number removed."""
+    base = tempdir or Path(tempfile.gettempdir())
+    now = now if now is not None else time.time()
+    removed = 0
+    try:
+        folders = [f for f in base.glob(COPY_PREFIX + "*") if f.is_dir()]
+    except OSError:
+        return 0
+    for folder in folders:
+        try:
+            if now - folder.stat().st_mtime > older_than:
+                shutil.rmtree(folder, ignore_errors=True)
+                removed += 1
+        except OSError:
+            pass
+    return removed
 
 
 class Session:
@@ -67,7 +113,18 @@ class Session:
         """Open the vault file, or create it when there is none yet, without making it the
         open one — safe on a thread (the key is derived here). WrongPassword and BadFile
         come through from the vault."""
+        self._drop_stale_tmp()
         return Vault.open(self.vault_path, password) if self.exists else Vault.create(self.vault_path, password)
+
+    def _drop_stale_tmp(self) -> None:
+        """A `vault.pkv.tmp` left by a crash mid-write (the next write truncates it anyway,
+        but it confuses the list of copies). A fresh one may be another window's write."""
+        tmp = self.vault_path.with_suffix(self.vault_path.suffix + ".tmp")
+        try:
+            if tmp.exists() and time.time() - tmp.stat().st_mtime > STALE_TMP_SEC:
+                tmp.unlink()
+        except OSError:
+            pass
 
     def unlock(self, password: str, vault: Vault | None = None) -> Vault:
         """Make the vault the open one: `vault` opened already (open_vault), else opened now."""
@@ -113,19 +170,25 @@ class Session:
 
     def pull_inbox(self) -> tuple[int, int] | None:
         """File what the sessions wrote into the inbox and delete it: (new items, items
-        read), None when there was nothing or the vault is locked. The save's OSError
-        comes through, with the inbox left in place."""
+        read), None when there was nothing or the vault is locked. The inbox is first
+        moved aside (claim_inbox): a line the hook appends while it is read and saved goes
+        to a fresh inbox and is picked up next time, not deleted unread. The save's
+        OSError comes through, with the claimed file left for the next pull."""
         if self.vault is None:
             return None
         try:
-            items = read_inbox(self.inbox_path)
+            claimed = claim_inbox(self.inbox_path)
+            items = [item for path in claimed for item in read_inbox(path)]
         except OSError:
             return None
         if not items:
+            for path in claimed:
+                path.unlink(missing_ok=True)
             return None
         added = merge_inbox(self.vault.journal, items, self.links().work_hosts)
         self.vault.save()
-        clear_inbox(self.inbox_path)
+        for path in claimed:
+            path.unlink(missing_ok=True)
         return added, len(items)
 
     # ---- export
@@ -140,16 +203,16 @@ class Session:
             return 0
         target = Path(path)
         if fmt == "txt":
-            data = export_text(self.vault.entries).encode("utf-8")
+            data = readable(export_text(self.vault.entries)).encode("utf-8")
         else:
-            data = export_csv(self.vault.entries).encode("utf-8-sig")
+            data = readable(export_csv(self.vault.entries)).encode("utf-8-sig")
         write_private(target, data)  # every password in the clear: owner-only, as the vault
         return len(self.vault.entries)
 
     def write_full_export(self, path: Path) -> None:
         """Everything the tabs hold into `path` as readable JSON, owner-only. The caller has
         asked for the master password."""
-        data = json.dumps(self._open_vault().export_data(), ensure_ascii=False, indent=1).encode("utf-8")
+        data = readable(json.dumps(self._open_vault().export_data(), ensure_ascii=False, indent=1)).encode("utf-8")
         write_private(Path(path), data)
 
     def import_full(self, path: Path) -> Path:

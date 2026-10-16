@@ -11,14 +11,17 @@ Config — the `hook` key of settings.json next to the vault:
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
+import sys
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import NamedTuple
 from collections.abc import Callable
 
 from .i18n import variants
-from .settings import Links
+from .settings import Links, app_dir
 
 COMMAND_TOOLS = ("Bash", "PowerShell")
 MATCHER = "Bash|PowerShell|mcp__.*"  # Claude Code calls the hook only for these tools
@@ -84,17 +87,35 @@ class Call:
 # ---- ready-made sets
 
 
-def _body_text(command: str) -> str:
-    """Request body from the command: inline after -d/--data or a file after @path."""
+def _body_text(command: str, cwd: str = "") -> str:
+    """Request body from the command: inline after -d/--data or a file after @path. Only a
+    file under the folder the command ran in is read (a relative path when the folder is
+    not known): the hook looks for a verdict in the body it sent, not in any file a
+    command happens to name."""
     parts = [command]
     for m in re.finditer(r"@(['\"]?)([^\s'\"]+)\1", command):
-        path = Path(m.group(2))
+        path = _under_cwd(Path(m.group(2)), cwd)
+        if path is None:
+            continue
         try:
             if path.is_file() and path.stat().st_size < 512_000:
                 parts.append(path.read_text(encoding="utf-8", errors="replace"))
         except OSError:
             pass
     return "\n".join(parts)
+
+
+def _under_cwd(path: Path, cwd: str) -> Path | None:
+    """The file's full path when it lies under `cwd`; None otherwise. Without a known
+    folder only a relative path without `..` qualifies."""
+    if not cwd:
+        return None if path.is_absolute() or ".." in path.parts else path
+    try:
+        base = Path(cwd).resolve()
+        full = (base / path).resolve() if not path.is_absolute() else path.resolve()
+    except OSError:
+        return None
+    return full if full == base or base in full.parents else None
 
 
 class Ctx(NamedTuple):
@@ -185,7 +206,7 @@ def _tracker(ctx: Ctx) -> list[tuple[str, str]]:
             if m:
                 found.append(("bug", m.group(1)))
         m = re.search(r"/rest/api/[23]/issue/([A-Z][A-Z0-9]+-\d+)/transitions", command)
-        if m and "test failed" in _body_text(command).lower():
+        if m and "test failed" in _body_text(command, call.cwd).lower():
             found.append(("fail", m.group(1)))
     elif _is_tracker_tool(call.tool):
         name, inp = call.tool.lower(), call.command
@@ -206,7 +227,7 @@ def _verdict(ctx: Ctx) -> list[tuple[str, str]]:
     if call.is_command:
         m = re.search(r"/rest/api/[23]/issue/([A-Z][A-Z0-9]+-\d+)/comment", call.command)
         if m:
-            body = _body_text(call.command)
+            body = _body_text(call.command, call.cwd)
             if head.search(body):
                 return [("fail" if any(w in body.lower() for w in _fail_words()) else "pass", m.group(1))]
     elif _is_tracker_tool(call.tool) and "comment" in call.tool.lower():
@@ -277,10 +298,263 @@ def looks_secret(text: str) -> bool:
     return False
 
 
+# characters of the command and of the answer a user rule searches: an unanchored pattern
+# that starts with `.*` is quadratic on a text it does not match, and 16 KB keeps that
+# at ~0.15 s (64 KB took 2.3 s); what the journal looks for sits in the first lines anyway
+SCAN_LIMIT = 16 * 1024
+PATTERN_LIMIT = 500  # characters of a pattern
+INLINE_LIMIT = 2048  # characters: a longer text runs the user regex in a child process with a deadline
+MATCH_DEADLINE = 1.5  # s for that child, its start included (the hook has 15 s in all)
+slow_rules: list[str] = []  # the rules whose child hit the deadline in the last `match` (the hook logs them)
+# the child: a regex search on JSON from stdin, the groups as JSON on stdout; bytes in and
+# out, so the console code page and a lone surrogate in the text do not matter
+PROBE_CODE = (
+    "import json,re,sys\n"
+    "d=json.loads(sys.stdin.buffer.read().decode('utf-8','surrogatepass'))\n"
+    "try: m=re.search(d['pattern'],d['text'],d['flags'])\n"
+    "except Exception: m=None\n"
+    "sys.stdout.buffer.write(json.dumps(None if m is None else [m.group(0),*m.groups()]).encode('utf-8','surrogatepass'))\n"
+)
+
+
+class Found(NamedTuple):
+    """What a rule found: the whole match first, then the groups (None for one that did not take part)."""
+
+    groups: tuple
+
+    def group(self, i: int = 0) -> str | None:
+        return self.groups[i]
+
+    @property
+    def ngroups(self) -> int:
+        return len(self.groups) - 1
+
+
+def _found(m: re.Match | None) -> Found | None:
+    return None if m is None else Found((m.group(0), *m.groups()))
+
+
+def regex_probe_main() -> int:
+    """The child process (`daykeeper-cli regex-probe`): PROBE_CODE as a function."""
+    exec(PROBE_CODE, {})  # noqa: S102 — our own constant, the same code the source tree runs with -c
+    return 0
+
+
+def _probe_argv() -> list[str] | None:
+    """How to start the child: this Python with the code, or the built helper. None — no
+    child can be started (the built app without its helper)."""
+    if not getattr(sys, "frozen", False):
+        return [sys.executable.replace("pythonw.exe", "python.exe"), "-I", "-S", "-c", PROBE_CODE]
+    exe = Path(sys.executable)
+    if exe.stem == "daykeeper-cli":
+        return [str(exe), "regex-probe"]
+    # the app: its installed helper (where claudecode.helper_dir puts it; that module imports this one)
+    local = os.environ.get("LOCALAPPDATA")
+    helper = (Path(local) / "Daykeeper" if local else app_dir()) / "bin" / "daykeeper-cli" / ("daykeeper-cli.exe" if os.name == "nt" else "daykeeper-cli")
+    return [str(helper), "regex-probe"] if helper.exists() else None
+
+
+def search_with_deadline(pattern: str, text: str, flags: int = 0, deadline: float = MATCH_DEADLINE) -> Found | None | bool:
+    """`re.search` in a child process that is killed at `deadline`: the match, None, or
+    False when it ran out of time. A worker thread would not do — CPython's `re` holds
+    the GIL for the whole search, so the thread would stall the hook with it. Without a
+    child to start the text is cut to INLINE_LIMIT and searched here."""
+    argv = _probe_argv()
+    if argv is None:
+        try:
+            return _found(re.search(pattern, text[:INLINE_LIMIT], flags))
+        except (re.error, RecursionError):
+            return None
+    payload = json.dumps({"pattern": pattern, "text": text, "flags": flags}).encode("utf-8", "surrogatepass")
+    try:
+        out = subprocess.run(argv, input=payload, capture_output=True, timeout=deadline, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))  # noqa: S603 — this very program
+    except subprocess.TimeoutExpired:
+        return False
+    except OSError:
+        return None
+    if out.returncode != 0:
+        return None
+    try:
+        groups = json.loads(out.stdout.decode("utf-8", "surrogatepass"))
+    except ValueError:
+        return None
+    return None if groups is None else Found(tuple(groups))
+RISK_NESTED, RISK_OVERLAP, RISK_ADJACENT = "nested", "overlap", "adjacent"
+_SAMPLE = "".join(chr(c) for c in range(32, 127)) + "\n\t\r\u00e9\u0436\u4e2d"  # characters two one-character atoms are compared on
+_ZERO_WIDTH = {"^", "$", "\\b", "\\B", "\\A", "\\Z"}
+
+
+def _parse(pattern: str, i: int = 0) -> tuple[list[list[tuple]], int]:
+    """A rough parse of a regex into branches of (atom, quantifier) — an atom is the text of
+    a literal, an escape, a class or a dot, or a list of branches for a group. Enough to
+    see the two shapes behind catastrophic backtracking; `re.compile` has checked the
+    syntax before this runs."""
+    branches: list[list[tuple]] = [[]]
+    n = len(pattern)
+    while i < n:
+        ch = pattern[i]
+        atom: object
+        if ch == "\\":
+            atom, i = pattern[i : i + 2], i + 2
+        elif ch == "[":
+            j = i + 1
+            if pattern[j : j + 1] == "^":
+                j += 1
+            if pattern[j : j + 1] == "]":
+                j += 1
+            while j < n and pattern[j] != "]":
+                j += 2 if pattern[j] == "\\" else 1
+            atom, i = pattern[i : j + 1], j + 1
+        elif ch == "(":
+            j = i + 1
+            if pattern[j : j + 1] == "?":  # (?:…) (?P<n>…) (?=…) (?!…) (?<=…) (?<!…) (?i:…)
+                j += 1
+                if pattern[j : j + 1] == "P" and pattern[j + 1 : j + 2] == "<":
+                    j = pattern.index(">", j) + 1
+                else:
+                    while j < n and pattern[j] not in ":)":
+                        j += 1
+                    if pattern[j : j + 1] == ":":
+                        j += 1
+            inner, i = _parse(pattern, j)
+            atom = inner
+        elif ch == ")":
+            return branches, i + 1
+        elif ch == "|":
+            branches.append([])
+            i += 1
+            continue
+        else:
+            atom, i = ch, i + 1
+        q = ""
+        if i < n and pattern[i] in "+*?":
+            q, i = pattern[i], i + 1
+        elif i < n and pattern[i] == "{":
+            m = re.match(r"\{\d*,?\d*\}", pattern[i:])
+            if m:
+                q, i = m.group(0), i + m.end()
+        if q and i < n and pattern[i] == "?":  # lazy
+            i += 1
+        branches[-1].append((atom, q))
+    return branches, i
+
+
+def _repeats(q: str) -> bool:
+    return q in ("+", "*") or q.startswith("{")
+
+
+def _unbounded(q: str) -> bool:
+    return q in ("+", "*") or (q.startswith("{") and q.endswith(",}"))
+
+
+def _has_repeat(branches: list[list[tuple]]) -> bool:
+    return any(_repeats(q) or (isinstance(atom, list) and _has_repeat(atom)) for branch in branches for atom, q in branch)
+
+
+def _first_atoms(branch: list[tuple]) -> tuple[set[str], bool]:
+    """The one-character atoms a branch can start with, and whether it can be empty."""
+    first: set[str] = set()
+    for atom, q in branch:
+        if isinstance(atom, list):
+            for sub in atom:
+                inner, empty = _first_atoms(sub)
+                first |= inner
+                if not empty and q not in ("?", "*"):
+                    return first, False
+            if q in ("?", "*") or any(_first_atoms(sub)[1] for sub in atom):
+                continue
+            return first, False
+        if atom in _ZERO_WIDTH:
+            continue
+        first.add(atom)
+        if q not in ("?", "*"):
+            return first, False
+    return first, True
+
+
+def _atoms_overlap(a: str, b: str) -> bool:
+    try:
+        ra, rb = re.compile(a), re.compile(b)
+    except re.error:
+        return True
+    return any(ra.fullmatch(c) and rb.fullmatch(c) for c in _SAMPLE + a + b)
+
+
+def _adjacent_overlap(branches: list[list[tuple]]) -> bool:
+    """Two unbounded repeats in a row (a skippable atom between them allowed) that can
+    match the same character — `\\d+\\d+`, `.*.*`, `.+\\d+`: quadratic on a long answer
+    that does not match."""
+    for branch in branches:
+        carried: set[str] = set()  # the atoms of the last unbounded repeat still adjacent
+        for atom, q in branch:
+            if isinstance(atom, list):
+                if _adjacent_overlap(atom):
+                    return True
+                firsts = {a for sub in atom for a in _first_atoms(sub)[0]}
+                if _unbounded(q) and any(_atoms_overlap(a, b) for a in carried for b in firsts):
+                    return True
+                carried = firsts if _unbounded(q) else (carried if q in ("?", "*") else set())
+                continue
+            if atom in _ZERO_WIDTH:
+                continue
+            if _unbounded(q):
+                if any(_atoms_overlap(a, atom) for a in carried):
+                    return True
+                carried = {atom} | (carried if q == "*" or q.startswith("{0") else set())  # a repeat that may be empty keeps its neighbours adjacent
+            elif q != "?":
+                carried = set()
+    return False
+
+
+def pattern_risk(pattern: str) -> str:
+    """"" when the pattern is bounded on the hook's text; RISK_NESTED for a repeated group
+    that repeats inside (`(a+)+`), RISK_OVERLAP for a repeated group whose alternatives
+    can start alike or be empty (`(a|aa)+`, `(.|x)*`), RISK_ADJACENT for two unbounded
+    repeats in a row that can match the same characters (`\\d+\\d+`, `.*.*`). On the right
+    input the first two shapes run for hours and the third for minutes, and a worker
+    thread cannot cut either short: `re` holds the GIL."""
+    try:
+        branches, _ = _parse(pattern)
+    except (IndexError, ValueError):
+        return ""
+
+    def walk(branches: list[list[tuple]]) -> str:
+        for branch in branches:
+            for atom, q in branch:
+                if not isinstance(atom, list):
+                    continue
+                if _repeats(q):
+                    if _has_repeat(atom):
+                        return RISK_NESTED
+                    if len(atom) > 1:
+                        firsts = [_first_atoms(sub) for sub in atom]
+                        if any(empty for _f, empty in firsts):
+                            return RISK_OVERLAP
+                        for x in range(len(firsts)):
+                            for y in range(x + 1, len(firsts)):
+                                if any(_atoms_overlap(a, b) for a in firsts[x][0] for b in firsts[y][0]):
+                                    return RISK_OVERLAP
+                found = walk(atom)
+                if found:
+                    return found
+        return ""
+
+    return walk(branches) or (RISK_ADJACENT if _adjacent_overlap(branches) else "")
+
+
+def nested_quantifier(pattern: str) -> bool:
+    return pattern_risk(pattern) == RISK_NESTED
+
+
 @dataclass
 class Rule:
     """“If the command (answer) has `pattern` — write `status` with an item taken by `take`.”
-    `also` — a second piece of text the answer must contain (e.g. a success word)."""
+    `also` — a second piece of text the answer must contain (e.g. a success word).
+    A regex pattern is bounded: at most PATTERN_LIMIT characters, none of the shapes
+    behind catastrophic backtracking (pattern_risk), searched in the first SCAN_LIMIT
+    characters, and on a text longer than INLINE_LIMIT in a child process with a deadline
+    — a rule written by accident as `^(a+)+$` once made every tool call of the assistant
+    wait the full hook timeout."""
 
     name: str = ""
     status: str = "note"
@@ -312,20 +586,39 @@ class Rule:
         """Why the rule cannot be saved (a UI key), or ""."""
         if not self.pattern.strip():
             return "Say what to look for"
+        if len(self.pattern) > PATTERN_LIMIT:
+            return "The pattern is too long (500 characters at most)"
         if self.regex:
             try:
                 re.compile(self.pattern)
             except re.error:
                 return "The pattern is not a valid regular expression"
+            risk = pattern_risk(self.pattern)
+            if risk == RISK_NESTED:
+                return "The pattern repeats a repeated group, like (a+)+: on a long answer it would run for minutes"
+            if risk == RISK_OVERLAP:
+                return "The pattern repeats a choice whose options can start alike, like (a|aa)+: on a long answer it would run for minutes"
+            if risk == RISK_ADJACENT:
+                return "The pattern has two repeats in a row that can match the same characters, like \\d+\\d+: on a long answer it would run for minutes"
         if self.take == TAKE_TEXT and not self.text.strip():
             return "Say what to write"
         return ""
 
-    def _find(self, text: str) -> re.Match | None:
-        try:
-            return re.search(self.pattern if self.regex else re.escape(self.pattern), text, 0 if self.regex else re.IGNORECASE)
-        except re.error:
-            return None
+    def _find(self, text: str) -> Found | None:
+        text = text[:SCAN_LIMIT]
+        if not self.regex:
+            return _found(re.search(re.escape(self.pattern), text, re.IGNORECASE))
+        if len(self.pattern) > PATTERN_LIMIT or pattern_risk(self.pattern):
+            return None  # saved by hand into settings.json: the same rule as in the editor
+        if len(text) <= INLINE_LIMIT:
+            try:
+                return _found(re.search(self.pattern, text))
+            except (re.error, RecursionError):
+                return None
+        found = search_with_deadline(self.pattern, text)
+        if found is False:
+            slow_rules.append(self.name or self.pattern)
+        return found if isinstance(found, Found) else None
 
     def apply(self, call: Call, links: Links) -> list[tuple[str, str]]:
         if not self.enabled or not self.pattern:
@@ -338,7 +631,7 @@ class Rule:
         if self.take == TAKE_TEXT:
             item = self.text.strip()
         elif self.take == TAKE_MATCH:
-            item = (m.group(1) if m.re.groups else m.group(0)).strip()
+            item = ((m.group(1) if m.ngroups else m.group(0)) or "").strip()
             if looks_secret(item):
                 return []  # the journal is plain text: a pattern that caught a token must not write it there
         elif self.take == TAKE_KEY:
@@ -411,6 +704,7 @@ def _folder_key(path: str) -> str:
 def match(payload: dict, config: HookConfig, links: Links, own_mr: Callable[[str], bool | None] | None = None) -> list[Hit]:
     """Journal events in one tool call, each with the rule that found it. Duplicates dropped."""
     call = Call.from_payload(payload)
+    slow_rules.clear()
     if any(marker in call.command for marker in SELF_TEST_MARKERS):
         return []
     ctx = Ctx(call, links, own_mr)

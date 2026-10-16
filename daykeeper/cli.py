@@ -19,7 +19,7 @@ import sys
 import time
 from pathlib import Path
 
-from .hookrules import MR_URL_RE, HookConfig, match
+from .hookrules import MR_URL_RE, HookConfig, looks_secret, match, regex_probe_main, slow_rules
 from .journal import append_inbox, inbox_path_for, repo_host
 from .journal_layout import Layout, configure as configure_layout, resolve_known
 from .settings import Links, app_dir, read_settings, settings_path_for
@@ -65,6 +65,9 @@ def inbox_main(argv: list[str] | None = None, prog: str | None = None) -> int:
         parser.error(f"status must be one of: {', '.join(words)}")
     origin = "" if args.work else "personal" if args.personal else None
     path = args.inbox or inbox_path_for(vault_path())
+    secret = [x for x in [*args.items, args.note] if looks_secret(x)]
+    if secret:  # the inbox and the journal are plain text: a token typed into a note would sit there in the clear
+        parser.error("this looks like a token or a key, and the journal is not the place for one: " + ", ".join(w[:8] + "…" for w in secret))
     n = append_inbox(path, args.status, args.items, date=args.date, note=args.note, origin=origin)
     print(f"inbox: +{n} ({args.status}) -> {path}")
     return 0 if n else 1
@@ -181,9 +184,11 @@ def run_hook(payload: dict, settings: dict, inbox: Path, log: Path, own_mr=None)
     configure_layout(layout)
     found = match(payload, config, links, own_mr)
     hits = [h for h in found if resolve_known(h.status, layout) is not None]  # another layout's line is kept hidden
+    cwd = str(payload.get("cwd") or "")
+    if slow_rules:  # a user regex ran out of time on this answer: the app shows it under "Recent triggers"
+        write_log(log, {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), "tool": str(payload.get("tool_name", "")), "cwd": cwd, "events": [], "slow_rules": list(slow_rules)})
     if not found:
         return []
-    cwd = str(payload.get("cwd") or "")
     row = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), "tool": str(payload.get("tool_name", "")), "cwd": cwd,
            "events": [[h.status, h.item, h.rule] for h in hits]}
     if not hits:
@@ -205,7 +210,7 @@ def hook_main() -> int:
     """Never blocks Claude: any trouble ends in the log and exit code 0."""
     try:
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8-sig", "replace"))  # UTF-8 whatever the console code page; a BOM is dropped
-    except (ValueError, OSError, AttributeError):
+    except Exception:  # noqa: BLE001 — bad JSON, a closed pipe, or a RecursionError on `[` × 200 000: none may show a traceback to the user
         return 0
     if not isinstance(payload, dict):
         return 0
@@ -227,4 +232,6 @@ def main(argv: list[str] | None = None) -> int:
         _data_dir, argv = Path(argv[1]), argv[2:]
     if argv[:1] == ["hook"]:
         return hook_main()
+    if argv[:1] == ["regex-probe"]:
+        return regex_probe_main()
     return inbox_main(argv, prog="daykeeper-cli")

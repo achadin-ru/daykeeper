@@ -43,6 +43,22 @@ files = [
     "daykeeper/envimport.py",
     "daykeeper/errlog.py",
     "daykeeper/settings.py",
+    "daykeeper/undo.py",
+    "daykeeper/timers.py",
+    "daykeeper/revisions.py",
+    "daykeeper/export.py",
+    "daykeeper/markdown.py",
+    "daykeeper/pngimage.py",
+    "daykeeper/i18n.py",
+    "daykeeper/autostart.py",
+    "daykeeper/runner.py",
+    "daykeeper/claudecode.py",
+    "daykeeper/win32.py",
+    "daykeeper/clipboard.py",
+    "daykeeper/jobs.py",
+    "daykeeper/layout.py",
+    "daykeeper/tabs.py",
+    "daykeeper/fieldicons.py",
 ]
 ignore_missing_imports = true
 warn_unused_ignores = true

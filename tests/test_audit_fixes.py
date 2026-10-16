@@ -92,7 +92,7 @@ class InboxTest(unittest.TestCase):
         append_inbox(s.inbox_path, "pass", ["APP-7"])
         with self.assertRaises(ChangedOnDisk):
             s.pull_inbox()
-        self.assertTrue(s.inbox_path.exists(), "nothing was filed, so nothing is deleted")
+        self.assertTrue(list(s.inbox_path.parent.glob("inbox.jsonl*")), "nothing was filed, so nothing is deleted (the claimed file waits for the next pull)")
 
     def test_the_conflict_copy_opens_with_the_same_password(self):
         s = Session(self.path)
@@ -537,7 +537,7 @@ class AppLockTest(unittest.TestCase):
         with mock.patch("daykeeper.win32.dpi_of_window", return_value=96):
             app._check_dpi()
             app.update()
-        self.assertEqual(app.painter.scale, 1.0)
+        self.assertAlmostEqual(app.painter.scale, 1.0, places=2)  # Xvfb reports 96.19 dpi
 
     def test_wrong_codes_lock_the_app(self):
         accept = self.app.security.limited(lambda code: False, "wrong")

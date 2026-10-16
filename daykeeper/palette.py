@@ -37,9 +37,10 @@ CARD = "#FFFFFF"  # entry card
 FIELD = "#FFFFFF"
 BORDER = "#E3E6ED"
 TEXT = "#111827"
-MUTED = "#6B7280"
-DISABLED_TEXT = "#B8BDC7"  # a greyed-out menu item
+MUTED = "#667085"  # 4.7:1 on the window background (#6B7280 was 4.4:1)
+DISABLED_TEXT = "#6E7684"  # a greyed-out menu item (4.5:1 on white; #B8BDC7 was 1.9:1)
 ACCENT = "#4F46E5"
+LINK = "#4F46E5"  # link-like text on a card; lighter than the accent in the dark theme, where the accent fill is too dim for text
 ACCENT_HOVER = "#4338CA"
 ACCENT_PRESSED = "#3730A3"
 ACCENT_DISABLED = "#A5B4FC"
@@ -48,7 +49,7 @@ ACCENT_INK = "#3730A3"  # text on a soft accent background
 DANGER = "#DC2626"
 DANGER_SOFT = "#FEE2E2"  # a danger button under the pointer
 DANGER_PRESSED = "#FECACA"
-SUCCESS = "#16A34A"
+SUCCESS = "#15803D"  # 4.5:1 on white (#16A34A was 3.3:1)
 HOVER = "#F1F3F8"
 PRESSED = "#E6E9F0"
 CHECK_BORDER = "#C3C8D3"
@@ -82,8 +83,9 @@ DARK = {
     "BORDER": "#343A46",
     "TEXT": "#E7E9EE",
     "MUTED": "#9AA3B2",
-    "DISABLED_TEXT": "#5B6372",
+    "DISABLED_TEXT": "#8E97A7",
     "ACCENT": "#6366F1",
+    "LINK": "#818CF8",
     "ACCENT_HOVER": "#7477F4",
     "ACCENT_PRESSED": "#4F46E5",
     "ACCENT_DISABLED": "#3E4180",
@@ -100,7 +102,7 @@ DARK = {
     "SCROLL_HOVER": "#596273",
     "RAIL": "#0E1014",
     "RAIL_HOVER": "#20242B",
-    "RAIL_ACTIVE": "#6366F1",
+    "RAIL_ACTIVE": "#5457E5",
     "RAIL_TEXT": "#9CA3AF",
     "CRED_BG": "#2A2F38",
     "CONSOLE_BG": "#0B0E14",

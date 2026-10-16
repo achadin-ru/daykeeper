@@ -85,9 +85,18 @@ jobs:
         run: python -X faulthandler -c "import faulthandler, sys, unittest; faulthandler.dump_traceback_later(600, exit=True); sys.argv = ['unittest', 'discover', '-v', 'tests']; unittest.main(module=None)"
 
       - name: Build app bundle
+        # PyInstaller writes 0.0.0 into Info.plist: the version comes from the package, the
+        # minimum system is the macOS the bundle is built and tested on; the ad-hoc signature
+        # is renewed after the plist edit (the edit breaks the one PyInstaller made)
         run: |
           python -m PyInstaller --noconfirm --clean --windowed --noupx --name Daykeeper \
             --osx-bundle-identifier ru.achadin.daykeeper main.py
+          VERSION=$(python -c "import daykeeper; print(daykeeper.__version__)")
+          PLIST=dist/Daykeeper.app/Contents/Info.plist
+          plutil -replace CFBundleShortVersionString -string "$VERSION" "$PLIST"
+          plutil -replace CFBundleVersion -string "$VERSION" "$PLIST"
+          plutil -replace LSMinimumSystemVersion -string "14.0" "$PLIST"
+          codesign --force --deep --sign - dist/Daykeeper.app
           ditto -c -k --sequesterRsrc --keepParent dist/Daykeeper.app dist/Daykeeper-macos.zip
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -101,6 +110,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write  # the provenance attestation is signed with the workflow's identity
+      attestations: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -115,6 +126,16 @@ jobs:
           cd out
           sha256sum Daykeeper.exe Daykeeper-macos.zip > SHA256SUMS.txt
           cat SHA256SUMS.txt
+
+      - name: Provenance
+        # a signed statement of which workflow run, commit and inputs built each file; check a
+        # download with `gh attestation verify Daykeeper.exe --owner <owner>`. The binaries
+        # themselves stay unsigned: a code-signing certificate is not in hand (see README).
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-path: |
+            out/Daykeeper.exe
+            out/Daykeeper-macos.zip
 
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:

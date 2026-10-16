@@ -76,7 +76,7 @@ class JournalSection:
         ttk.Button(group, text=add_text, style="Small.TButton", command=add).pack(anchor="w", pady=(10, 0))
         return box
 
-    PHRASE_TIP = "A word for the first line of the report when there are items, e.g. RFT or code review. Empty — nothing."
+    PHRASE_TIP = "A word for the first line of the report when there are items, e.g. tested tasks or code review. Empty — nothing."
     ROLE_TIP = "MR numbers — !42 and links on one line; test cases — one shared “New tests” line; a list — any items on one line; notes — each goes into line 1 as it is."
 
     def _paint(self) -> None:
@@ -264,7 +264,7 @@ class JournalSection:
         for text, var, attr, tip in (
             (_("MR numbers short: !42, repo!17"), self.mr_var, "mr_short", _("Off — every MR as a full link.")),
             (_("The “Plans” line"), self.plans_var, "show_plans", _("“2. Plans” in the day editor and the report.")),
-            (_("The “Absence / extra info” line"), self.other_var, "show_other", _("The last numbered line: absence, extra information.")),
+            (_("The “Out of office / other” line"), self.other_var, "show_other", _("The last numbered line: time off, and anything else worth a line.")),
         ):
             box = ttk.Checkbutton(group, text=text, variable=var, style="Card.TCheckbutton", command=lambda a=attr, v=var: setattr(self.layout, a, v.get()))
             box.pack(anchor="w", pady=2)

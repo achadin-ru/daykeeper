@@ -452,7 +452,7 @@ class IntegrationsPage(TabPage):
         clear = tk.Label(feed_head, text=_("Clear"), bg=palette.CARD, fg=palette.MUTED, font=self._ifonts["small"], cursor="hand2")
         clear.pack(side="right")
         clear.bind("<Button-1>", lambda _e: (integ.clear_feed(), self.app.mark_dirty("integrations"), self.render_feed(), self.update_badge()))
-        read = tk.Label(feed_head, text=_("Mark all read"), bg=palette.CARD, fg=palette.ACCENT, font=self._ifonts["small"], cursor="hand2")
+        read = tk.Label(feed_head, text=_("Mark all read"), bg=palette.CARD, fg=palette.LINK, font=self._ifonts["small"], cursor="hand2")
         read.pack(side="right", padx=(0, 14))
         read.bind("<Button-1>", lambda _e: (integ.mark_all_read(), self.app.mark_dirty("integrations"), self.render_feed(), self.update_badge()))
         self._feed_box = tk.Frame(feed_parent, bg=palette.CARD)
@@ -501,7 +501,7 @@ class IntegrationsPage(TabPage):
                 w.bind("<Button-1>", open_event)
         rest = len(feed) - self._feed_count
         if rest > 0:
-            more = tk.Label(box, text=_("Show more ({n})").format(n=rest), bg=palette.CARD, fg=palette.ACCENT, font=self._ifonts["small"], cursor="hand2")
+            more = tk.Label(box, text=_("Show more ({n})").format(n=rest), bg=palette.CARD, fg=palette.LINK, font=self._ifonts["small"], cursor="hand2")
             more.pack(anchor="w", pady=(8, 0))
             more.bind("<Button-1>", lambda _e: self._show_more())
 

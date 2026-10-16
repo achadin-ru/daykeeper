@@ -114,10 +114,10 @@ class ActivityTest(LinksCase):
         day.add_activity("manual", "APP-101")
         day.add_activity("mr_open", "https://gitlab.example.com/team/product/-/merge_requests/17")
         # opened and merged MRs are listed, not named in "1."; both kinds of tests are one phrase; a note goes into "1."
-        self.assertEqual(day.auto_summary(), "RFT, reviewed MRs, new manual/autotests, nightly triage")
+        self.assertEqual(day.auto_summary(), "tested tasks, reviewed MRs, new manual/autotests, nightly triage")
         text = build_report(day)
         lines = text.splitlines()
-        self.assertEqual(lines[0], "1. RFT, reviewed MRs, new manual/autotests, nightly triage")
+        self.assertEqual(lines[0], "1. tested tasks, reviewed MRs, new manual/autotests, nightly triage")
         self.assertEqual(lines[1:5], ["MR reviews: !42", "MRs opened: product!17", "MRs merged: !44", "New tests: APP-101"])
         self.assertEqual(lines[5], "Tested successfully:")
         day.summary = "own line"
