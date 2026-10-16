@@ -59,7 +59,9 @@ carries the console helper `dist\daykeeper-cli\` inside),
 The icon (`assets/icon.ico`, `.icns`, `.png` — the file icon and the window icon) is
 drawn by `tools/make_icon.py`; rerun it only after changing the design (needs Pillow).
 Releases are built by GitHub Actions: a tag like `v1.2.0` runs the tests and builds on
-Windows and macOS, then attaches both files and `SHA256SUMS.txt` to the release
+Windows and macOS, then attaches both files and `SHA256SUMS.txt` to the release (a tag
+with a suffix — `v1.2.0-beta.1`, `v1.2.0-rc.1` — makes a pre-release: still in
+development, marked so on GitHub and never offered as the latest)
 (`.github/workflows/build.yml`, actions pinned to commit hashes). Check a download:
 
 ```

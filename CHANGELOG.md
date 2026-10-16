@@ -1,6 +1,10 @@
 # Changes
 
-## 1.1.2 — the fixes of the audit of 16 October 2026
+## 1.1.2-beta.1 — pre-release: the fixes of the audit of 16 October 2026
+
+> **Pre-release, still in development.** Covered by the automated tests and a scripted
+> run of every screen, but not yet used day to day. Keep a copy of the vault
+> (Settings → Data) before trying it; 1.1.1 stays the latest stable release.
 
 Every finding of `AUDIT_REPORT.md` (section 9 there lists each with its test and probe).
 

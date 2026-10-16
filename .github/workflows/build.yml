@@ -94,8 +94,8 @@ jobs:
             --osx-bundle-identifier ru.achadin.daykeeper main.py
           VERSION=$(python -c "import daykeeper; print(daykeeper.__version__)")
           PLIST=dist/Daykeeper.app/Contents/Info.plist
-          plutil -replace CFBundleShortVersionString -string "$VERSION" "$PLIST"
-          plutil -replace CFBundleVersion -string "$VERSION" "$PLIST"
+          plutil -replace CFBundleShortVersionString -string "${VERSION%%-*}" "$PLIST"  # macOS takes digits and dots only: 1.1.2-beta.1 -> 1.1.2
+          plutil -replace CFBundleVersion -string "${VERSION%%-*}" "$PLIST"
           plutil -replace LSMinimumSystemVersion -string "14.0" "$PLIST"
           codesign --force --deep --sign - dist/Daykeeper.app
           ditto -c -k --sequesterRsrc --keepParent dist/Daykeeper.app dist/Daykeeper-macos.zip
@@ -146,3 +146,7 @@ jobs:
             out/SHA256SUMS.txt
           body_path: CHANGELOG.md
           generate_release_notes: true
+          # a tag with a suffix (v1.2.0-beta.1, -rc.1) is a pre-release: marked so on GitHub and
+          # never shown as the latest release
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ !contains(github.ref_name, '-') }}

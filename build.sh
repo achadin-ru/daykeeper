@@ -15,8 +15,8 @@ if [ "$(uname)" = "Darwin" ]; then
     # ad-hoc signature again — the plist edit breaks the one PyInstaller made
     VERSION=$(.venv/bin/python -c "import daykeeper; print(daykeeper.__version__)")
     PLIST=dist/Daykeeper.app/Contents/Info.plist
-    plutil -replace CFBundleShortVersionString -string "$VERSION" "$PLIST"
-    plutil -replace CFBundleVersion -string "$VERSION" "$PLIST"
+    plutil -replace CFBundleShortVersionString -string "${VERSION%%-*}" "$PLIST"  # macOS takes digits and dots only: 1.1.2-beta.1 -> 1.1.2
+    plutil -replace CFBundleVersion -string "${VERSION%%-*}" "$PLIST"
     plutil -replace LSMinimumSystemVersion -string "14.0" "$PLIST"
     codesign --force --deep --sign - dist/Daykeeper.app
     ditto -c -k --sequesterRsrc --keepParent dist/Daykeeper.app dist/Daykeeper-macos.zip

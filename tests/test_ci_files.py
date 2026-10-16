@@ -65,6 +65,15 @@ class CiFilesTest(unittest.TestCase):
         self.assertIn("--icon assets/icon.icns", workflow)
         self.assertEqual(workflow.count("--add-data \"assets"), 2, "the Windows exe and the macOS bundle")
 
+    def test_a_suffixed_tag_is_a_pre_release(self):
+        """v1.1.2-beta.1 goes out marked as a pre-release and never as the latest; the macOS
+        bundle keeps a numeric version."""
+        workflow = _read(".github/workflows/build.yml")
+        self.assertIn("prerelease: ${{ contains(github.ref_name, '-') }}", workflow)
+        self.assertIn("make_latest: ${{ !contains(github.ref_name, '-') }}", workflow)
+        for text in (workflow, _read("build.sh")):
+            self.assertIn('CFBundleShortVersionString -string "${VERSION%%-*}"', text)
+
     def test_dev_tools_are_pinned(self):
         text = _read("requirements-dev.txt")
         self.assertRegex(text, r"(?m)^pip-audit==\d", msg="pip-audit pinned")
