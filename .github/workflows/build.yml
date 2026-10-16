@@ -52,10 +52,10 @@ jobs:
         # The console helper first (the Claude Code hook and the journal commands, a folder:
         # it starts three times faster than one file), then the app that carries it.
         run: |
-          python -m PyInstaller --noconfirm --clean --onedir --console --noupx --name daykeeper-cli --exclude-module tkinter --exclude-module cryptography --exclude-module argon2 cli_main.py
+          python -m PyInstaller --noconfirm --clean --onedir --console --noupx --name daykeeper-cli --icon assets/icon.ico --exclude-module tkinter --exclude-module cryptography --exclude-module argon2 cli_main.py
           if ($LASTEXITCODE) { exit 1 }
           Set-Content -NoNewline -Encoding ascii dist/daykeeper-cli/build-id.txt "${{ github.sha }}"
-          python -m PyInstaller --noconfirm --clean --onefile --noconsole --noupx --name Daykeeper --add-data "dist/daykeeper-cli;daykeeper-cli" main.py
+          python -m PyInstaller --noconfirm --clean --onefile --noconsole --noupx --name Daykeeper --icon assets/icon.ico --add-data "assets;assets" --add-data "dist/daykeeper-cli;daykeeper-cli" main.py
           if ($LASTEXITCODE) { exit 1 }
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -90,6 +90,7 @@ jobs:
         # is renewed after the plist edit (the edit breaks the one PyInstaller made)
         run: |
           python -m PyInstaller --noconfirm --clean --windowed --noupx --name Daykeeper \
+            --icon assets/icon.icns --add-data "assets:assets" \
             --osx-bundle-identifier ru.achadin.daykeeper main.py
           VERSION=$(python -c "import daykeeper; print(daykeeper.__version__)")
           PLIST=dist/Daykeeper.app/Contents/Info.plist

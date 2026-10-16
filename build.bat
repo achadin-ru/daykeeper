@@ -10,10 +10,10 @@ if not exist .venv\Scripts\python.exe (
     .venv\Scripts\python -m pip install -q --require-hashes -r requirements-build.txt
 )
 .venv\Scripts\python --version
-.venv\Scripts\python -m PyInstaller --noconfirm --clean --onedir --console --noupx --name daykeeper-cli --exclude-module tkinter --exclude-module cryptography --exclude-module argon2 cli_main.py || exit /b 1
+.venv\Scripts\python -m PyInstaller --noconfirm --clean --onedir --console --noupx --name daykeeper-cli --icon assets\icon.ico --exclude-module tkinter --exclude-module cryptography --exclude-module argon2 cli_main.py || exit /b 1
 rem The app replaces an installed helper when this stamp differs.
 .venv\Scripts\python -c "import time, uuid; open(r'dist\daykeeper-cli\build-id.txt', 'w').write(time.strftime('%%Y%%m%%d-%%H%%M%%S-') + uuid.uuid4().hex[:8])" || exit /b 1
-.venv\Scripts\python -m PyInstaller --noconfirm --clean --onefile --noconsole --noupx --name Daykeeper --add-data "dist\daykeeper-cli;daykeeper-cli" main.py || exit /b 1
+.venv\Scripts\python -m PyInstaller --noconfirm --clean --onefile --noconsole --noupx --name Daykeeper --icon assets\icon.ico --add-data "assets;assets" --add-data "dist\daykeeper-cli;daykeeper-cli" main.py || exit /b 1
 echo.
 echo Done: %~dp0dist\Daykeeper.exe
 certutil -hashfile dist\Daykeeper.exe SHA256 | findstr /v "hashfile"

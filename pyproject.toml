@@ -28,6 +28,7 @@ platform = "win32"
 # the pure modules: the models, the formats, the parsers. The window (tkinter) is checked
 # by its tests and the smoke run.
 files = [
+    "daykeeper/appicon.py",
     "daykeeper/vault.py",
     "daykeeper/security.py",
     "daykeeper/journal.py",

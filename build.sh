@@ -9,6 +9,7 @@ if [ ! -x .venv/bin/python ]; then
 fi
 if [ "$(uname)" = "Darwin" ]; then
     .venv/bin/python -m PyInstaller --noconfirm --clean --windowed --noupx --name Daykeeper \
+        --icon assets/icon.icns --add-data "assets:assets" \
         --osx-bundle-identifier ru.achadin.daykeeper main.py
     # the version into Info.plist (PyInstaller writes 0.0.0), the minimum system, then the
     # ad-hoc signature again — the plist edit breaks the one PyInstaller made
@@ -22,7 +23,7 @@ if [ "$(uname)" = "Darwin" ]; then
     echo "Done: $(pwd)/dist/Daykeeper.app"
     shasum -a 256 dist/Daykeeper-macos.zip
 else
-    .venv/bin/python -m PyInstaller --noconfirm --clean --onefile --noconsole --noupx --name Daykeeper main.py
+    .venv/bin/python -m PyInstaller --noconfirm --clean --onefile --noconsole --noupx --name Daykeeper --add-data "assets:assets" main.py
     echo "Done: $(pwd)/dist/Daykeeper"
     sha256sum dist/Daykeeper
 fi

@@ -54,6 +54,17 @@ class CiFilesTest(unittest.TestCase):
             self.assertIn(f"daykeeper/{name}.py", files, name)
         self.assertGreaterEqual(len(files), 31)
 
+    def test_every_build_carries_the_icon(self):
+        """The file icon of the exe and the bundle, and the assets folder for the window icon."""
+        self.assertIn("--icon assets\\icon.ico", _read("build.bat"))
+        self.assertIn('--add-data "assets;assets"', _read("build.bat"))
+        self.assertIn("--icon assets/icon.icns", _read("build.sh"))
+        self.assertIn('--add-data "assets:assets"', _read("build.sh"))
+        workflow = _read(".github/workflows/build.yml")
+        self.assertIn("--icon assets/icon.ico", workflow)
+        self.assertIn("--icon assets/icon.icns", workflow)
+        self.assertEqual(workflow.count("--add-data \"assets"), 2, "the Windows exe and the macOS bundle")
+
     def test_dev_tools_are_pinned(self):
         text = _read("requirements-dev.txt")
         self.assertRegex(text, r"(?m)^pip-audit==\d", msg="pip-audit pinned")

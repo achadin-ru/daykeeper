@@ -4,6 +4,12 @@
 
 Every finding of `AUDIT_REPORT.md` (section 9 there lists each with its test and probe).
 
+**Look**
+- The app has an icon: an amber tile with the ink letter D and a small key in its counter.
+  It is the file icon of the Windows exe and the macOS bundle and the icon of every window
+  (before, the exe showed the PyInstaller default and the windows Tk's feather). The
+  picture is drawn by `tools/make_icon.py` into `assets/`.
+
 **Security**
 - The PIN / master-password guard over the Passwords tab was only a picture: `Ctrl+F`,
   `Tab` and `Space` reached the search, the list and the Copy button under it, and the card

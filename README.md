@@ -56,6 +56,8 @@ Build it yourself — `build.bat` on Windows (one windowless file, `dist\Daykeep
 carries the console helper `dist\daykeeper-cli\` inside),
 `build.sh` on macOS (`dist/Daykeeper.app`); both install the build tools from
 `requirements-build.txt` (exact versions with hashes) and print the SHA256 of the result.
+The icon (`assets/icon.ico`, `.icns`, `.png` — the file icon and the window icon) is
+drawn by `tools/make_icon.py`; rerun it only after changing the design (needs Pillow).
 Releases are built by GitHub Actions: a tag like `v1.2.0` runs the tests and builds on
 Windows and macOS, then attaches both files and `SHA256SUMS.txt` to the release
 (`.github/workflows/build.yml`, actions pinned to commit hashes). Check a download:

@@ -13,7 +13,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
-from . import autostart, fieldundo, palette, popup, theme, win32
+from . import appicon, autostart, fieldundo, palette, popup, theme, win32
 from .bookmarks_view import BookmarksPage
 from .claude_view import refresh_helper_in_background
 from .clipboard import CLEAR_SEC, SecretClipboard
@@ -73,6 +73,7 @@ class App(tk.Tk):
         # routines, no GitLab checks — the main copy already does that
         self.background_jobs = not preview
         self.title(APP_TITLE + (" — preview" if preview else ""))
+        appicon.apply(self)
         self.minsize(MIN_WIDTH, 540)
         self.session = Session(vault_path)  # the vault, its settings, the change counters, the inbox
         self._dpi = self._start_dpi()
