@@ -31,8 +31,7 @@ jobs:
 
       - name: Screenshots
         run: |
-          python -X faulthandler tools/screenshots.py shots light "${{ inputs.language }}"
-          python -X faulthandler tools/screenshots.py shots dark "${{ inputs.language }}"
+          python tools/diag_hang.py
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
