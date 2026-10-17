@@ -1,9 +1,11 @@
 """Jira watcher: the client against a fake API, snapshots and the events between them."""
 import base64
+import http.client
 import json
 import time
 import unittest
 import urllib.parse
+from unittest import mock
 
 from daykeeper import gitlab
 from daykeeper.jira import (
@@ -43,7 +45,7 @@ class FakeJira:
                 "summary": summary, "status": {"name": status, "statusCategory": {"key": category}},
                 "assignee": assignee, "reporter": reporter if reporter is not None else self.me,
                 "issuetype": {"name": itype}, "comment": {"comments": [], "total": 0, "maxResults": 50, "startAt": 0},
-                "updated": stamp(time.time()),
+                "created": stamp(time.time()), "updated": stamp(time.time()),
             },
             "changelog": {"startAt": 0, "maxResults": 100, "total": 0, "histories": []},
         }
@@ -159,6 +161,15 @@ class ClientTest(unittest.TestCase):
         with self.assertRaises(JiraError) as ctx:
             client_for(fake).transitions("DEMO-404")
         self.assertIn("Issue does not exist", str(ctx.exception))
+
+    def test_a_broken_answer_is_a_plain_error(self):
+        class BrokenOpener:
+            def open(self, req, timeout):
+                raise http.client.BadStatusLine("garbage")
+
+        with mock.patch("urllib.request.build_opener", return_value=BrokenOpener()), self.assertRaises(JiraError) as ctx:
+            JiraClient(DC, "tok").myself()
+        self.assertIn("broken answer", str(ctx.exception))
 
     def test_search_pages_by_startat_on_data_center(self):
         fake = FakeJira(cloud=False)
@@ -285,6 +296,40 @@ class SnapshotTest(unittest.TestCase):
         new, events = run(fake, old, since=last)
         self.assertEqual([(e.kind, e.mr) for e in events], [("assigned_bug", "DEMO-2")])
         self.assertIn("DEMO-1", new)  # a light check keeps what it did not read again
+
+    def test_full_check_skips_an_old_assignment_new_to_the_snapshot(self):
+        for fake in self.both():
+            with self.subTest(cloud=fake.cloud):
+                url = CLOUD if fake.cloud else DC
+                fake.add("DEMO-1")
+                last = time.time() - 120
+                old, _ = run(fake, {})
+                # a bug assigned to me a month ago drifts into the filter (an edited JQL)
+                long_ago = stamp(time.time() - 30 * 86400)
+                bug = fake.add("DEMO-2", itype="Bug", assignee=None, reporter=fake.other)
+                fake.assign("DEMO-2", fake.me)
+                bug["fields"]["created"] = bug["changelog"]["histories"][-1]["created"] = long_ago
+                result = check(url, "tok", "me@example.com", JiraSettings(), old, fetch=fake, previous=last)
+                self.assertTrue(result.full)
+                self.assertEqual(result.events, [])
+                self.assertIn("DEMO-2", result.snapshot)
+                # a fresh assignment of another bug still raises the event on a full check
+                fake.add("DEMO-3", itype="Bug", assignee=None, reporter=fake.other)
+                fake.assign("DEMO-3", fake.me)
+                result = check(url, "tok", "me@example.com", JiraSettings(), result.snapshot, fetch=fake, previous=last)
+                self.assertEqual([(e.kind, e.mr) for e in result.events], [("assigned_bug", "DEMO-3")])
+
+    def test_bug_created_already_assigned_to_me(self):
+        fake = FakeJira(cloud=False)
+        fake.add("DEMO-1")
+        last = time.time() - 120
+        old, _ = run(fake, {})
+        fake.add("DEMO-2", itype="Bug", assignee=fake.me, reporter=fake.other)  # no changelog entry
+        old_bug = fake.add("DEMO-3", itype="Bug", assignee=fake.me, reporter=fake.other)
+        old_bug["fields"]["created"] = stamp(time.time() - 30 * 86400)
+        new, events = run(fake, old, since=last)
+        self.assertEqual([(e.kind, e.mr) for e in events], [("assigned_bug", "DEMO-2")])
+        self.assertGreater(new["DEMO-2"]["assignee_at"], last)
 
     def test_new_comment_by_someone_else_in_my_issue(self):
         for fake in self.both():

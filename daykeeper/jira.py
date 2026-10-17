@@ -41,9 +41,10 @@ BUG_TYPES = ("bug", "defect")
 SINCE_MARGIN = 600  # s; a light check looks this far before the last one (clocks, a slow check)
 PAGE = 100
 SEARCH_LIMIT = 1000  # issues one check reads at most
-FIELDS = ("summary", "status", "assignee", "reporter", "issuetype", "comment", "updated")
+FIELDS = ("summary", "status", "assignee", "reporter", "issuetype", "comment", "created", "updated")
 TIMEOUT_TEXT = "Jira did not answer in time"
 JIRA_REDIRECT_TEXT = "Jira sends the request to another server — check the address in the settings"
+BROKEN_ANSWER_TEXT = "Jira sent a broken answer — try again later"
 NO_LOGIN_TEXT = "Jira Cloud needs the login (your e-mail) next to the API token"
 # a status category → how far along the work is; a watched status sits between work and done
 _RANK = {"new": 0.0, "indeterminate": 1.0, "done": 2.0}
@@ -169,6 +170,7 @@ class JiraClient:
     def _http(self, url: str, headers: dict, method: str = "GET", data: bytes | None = None) -> tuple[int, bytes]:
         """urllib with the redirect guard of gitlab.py (a redirect keeps the token on the
         same server). The network modules are imported on the first request."""
+        import http.client
         import ssl
         import urllib.error
         import urllib.request
@@ -187,6 +189,8 @@ class JiraClient:
             raise JiraError(JIRA_REDIRECT_TEXT if text == FOREIGN_REDIRECT_TEXT else text) from exc
         except TimeoutError as exc:
             raise JiraError(TIMEOUT_TEXT) from exc
+        except http.client.HTTPException as exc:  # a broken answer: BadStatusLine, IncompleteRead, …
+            raise JiraError(BROKEN_ANSWER_TEXT) from exc
         except (urllib.error.URLError, OSError, ssl.SSLError) as exc:
             reason = getattr(exc, "reason", exc)
             if isinstance(reason, TimeoutError):
@@ -364,7 +368,9 @@ def _facts(client: JiraClient, issue: dict, me_id: str) -> dict:
     # the newest by time; of two in the same second, the later in the list
     last = max(enumerate(comments), key=lambda ic: (_when(ic[1].get("created")), ic[0]), default=(0, None))[1]
     status_by, status_at = _last_change(issue, "status")
-    assignee_by, _at = _last_change(issue, "assignee")
+    assignee_by, assignee_at = _last_change(issue, "assignee")
+    if not assignee_at:  # assigned when the issue was created: no change in the changelog
+        assignee_at = _when(f.get("created"))
     key = str(issue.get("key", ""))
     assignee, reporter = _uid(f.get("assignee")), _uid(f.get("reporter"))
     return {
@@ -380,6 +386,7 @@ def _facts(client: JiraClient, issue: dict, me_id: str) -> dict:
         "status_by": status_by,
         "status_at": status_at,
         "assignee_by": assignee_by,
+        "assignee_at": assignee_at,
         "updated": str(f.get("updated") or ""),
         "url": web_url(client.browse(key)),
     }
@@ -411,6 +418,11 @@ def _is_bug(facts: dict) -> bool:
     return str(facts.get("type", "")).casefold() in BUG_TYPES
 
 
+def _recent(facts: dict, at_key: str, since: float) -> bool:
+    """The change behind `at_key` happened after `since` (the start of the last check)."""
+    return since > 0 and float(facts.get(at_key) or 0) >= since - SINCE_MARGIN
+
+
 def _event(kind: str, key: str, facts: dict, text: str, args: dict) -> Event:
     """An Event marked as coming from Jira. `gitlab.Event` is getting a `source` field;
     until it lands the mark is skipped — then this becomes a plain `source="jira"`."""
@@ -421,7 +433,9 @@ def _event(kind: str, key: str, facts: dict, text: str, args: dict) -> Event:
 def diff_snapshots(old: dict[str, dict], new: dict[str, dict], settings: JiraSettings, since: float = 0.0) -> list[Event]:
     """Events between two snapshots. What I did myself raises nothing. An issue seen for
     the first time raises only what happened after `since` (the start of the last check):
-    a bug assigned to me, a move into a watched status."""
+    a bug assigned to me, a move into a watched status. A full check reads issues that only
+    drifted into the filter (an edited JQL, a filter above SEARCH_LIMIT), so “first seen”
+    alone says nothing about when."""
     events: list[Event] = []
 
     def add(kind: str, ref: str, facts: dict, text: str, **args) -> None:
@@ -433,10 +447,9 @@ def diff_snapshots(old: dict[str, dict], new: dict[str, dict], settings: JiraSet
         before = old.get(key)
         by_other = now.get("status_by") != me or not me
         if before is None:
-            recent = since > 0 and float(now.get("status_at") or 0) >= since - SINCE_MARGIN
-            if recent and by_other and settings.watched(str(now.get("status", ""))):
+            if _recent(now, "status_at", since) and by_other and settings.watched(str(now.get("status", ""))):
                 add("status", key, now, "{key} moved to {status}", key=key, status=now.get("status", ""))
-            if me and now.get("assignee") == me and _is_bug(now) and now.get("assignee_by") != me:
+            if _recent(now, "assignee_at", since) and me and now.get("assignee") == me and _is_bug(now) and now.get("assignee_by") != me:
                 add("assigned_bug", key, now, "Bug {key} was assigned to you", key=key)
             continue
         moved = now.get("status") != before.get("status")
