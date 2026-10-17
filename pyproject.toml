@@ -60,6 +60,19 @@ files = [
     "daykeeper/layout.py",
     "daykeeper/tabs.py",
     "daykeeper/fieldicons.py",
+    "daykeeper/expiry.py",
+    "daykeeper/totp.py",
+    "daykeeper/hub.py",
+    "daykeeper/integrations.py",
+    "daykeeper/stats.py",
+    "daykeeper/templates.py",
+    "daykeeper/jira.py",
+    "daykeeper/importers.py",
+    "daykeeper/calendar_model.py",
+    "daykeeper/digest.py",
+    "daykeeper/quick.py",
+    "daykeeper/hotkey.py",
+    "daykeeper/cliphistory.py",
 ]
 ignore_missing_imports = true
 warn_unused_ignores = true

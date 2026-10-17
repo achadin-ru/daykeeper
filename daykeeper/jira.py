@@ -13,7 +13,6 @@ the rest is pure and unit-tested. Events are `gitlab.Event`, so they share one f
 from __future__ import annotations
 
 import base64
-import dataclasses
 import json
 import math
 import re
@@ -21,7 +20,6 @@ import time
 import urllib.parse
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
 
 from .gitlab import FOREIGN_REDIRECT_TEXT, FULL_EVERY, INTERVALS, CheckResult, Event, GitLabError, _token_may_go, web_url
 
@@ -424,10 +422,8 @@ def _recent(facts: dict, at_key: str, since: float) -> bool:
 
 
 def _event(kind: str, key: str, facts: dict, text: str, args: dict) -> Event:
-    """An Event marked as coming from Jira. `gitlab.Event` is getting a `source` field;
-    until it lands the mark is skipped — then this becomes a plain `source="jira"`."""
-    extra: dict[str, Any] = {"source": "jira"} if any(f.name == "source" for f in dataclasses.fields(Event)) else {}
-    return Event(kind, key, str(facts.get("summary", "")), str(facts.get("url", "")), text, args, **extra)
+    """An Event of the shared feed, marked as coming from Jira."""
+    return Event(kind, key, str(facts.get("summary", "")), str(facts.get("url", "")), text, args, source="jira")
 
 
 def diff_snapshots(old: dict[str, dict], new: dict[str, dict], settings: JiraSettings, since: float = 0.0) -> list[Event]:

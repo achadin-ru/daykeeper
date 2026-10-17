@@ -17,7 +17,7 @@ import re
 from dataclasses import dataclass
 from datetime import date as Date, timedelta
 
-from .bookmarks import URL_KEYS, _key_in, entry_login, has_secret
+from .bookmarks import entry_login, entry_url, has_secret
 from .hookrules import looks_secret
 from .i18n import _, fmt_day, variants
 from .journal import ISSUE_KEY_RE, MR_URL_RE, normalize_item, normalize_mr, today as journal_today
@@ -89,17 +89,8 @@ def _words(text: str) -> list[str]:
     return [w for w in re.split(r"[\W_]+", text) if w]
 
 
-# TODO: import bookmarks.entry_url instead once fix/entry-url-secret is merged (it stops opening secret fields)
 def _entry_url(entry) -> str:
-    """bookmarks.entry_url without reading a secret field: that one opens every value it
-    looks at, and the index opens none."""
-    for f in entry.fields:
-        if f.secret:
-            continue
-        value = f.value.strip()
-        if value and (_key_in(f.key, URL_KEYS) or value.startswith(("http://", "https://"))):
-            return value
-    return ""
+    return entry_url(entry)  # never opens a secret field
 
 
 def _entry_item(entry) -> Item:
