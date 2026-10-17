@@ -123,13 +123,28 @@ class Run:
         return out
 
 
+def cmd_quote(arg: str) -> str:
+    """One argument for a cmd.exe line: in double quotes when it has a space or a character
+    cmd would act on (& | < > ^ ( )); a quote inside is doubled, as cmd and the C runtime read it."""
+    if arg and not any(c in arg for c in ' 	"&|<>^()'):
+        return arg
+    return '"' + arg.replace('"', '""') + '"'
+
+
+def console_command(plan: Any) -> str:
+    """The cmd line that runs the plan in a console that stays open. Handed to Popen as a
+    string: a list goes through list2cmdline, whose \\" escapes cmd does not read, and a
+    quoted path or argument arrived cut into pieces. /S takes the outer quotes off as they are."""
+    line = plan.shell or " ".join(cmd_quote(a) for a in plan.argv)
+    return f'cmd /S /K "{line}"'
+
+
 def open_in_console(plan: Any) -> bool:
     """Start the plan in a separate console window that stays open after the script ends.
     False — no terminal program was found (Linux without one); the caller runs it quietly."""
     cwd = plan.cwd or None
     if sys.platform == "win32":
-        cmdline = plan.shell or subprocess.list2cmdline(plan.argv)
-        subprocess.Popen(["cmd", "/k", cmdline], cwd=cwd, creationflags=CREATE_NEW_CONSOLE)  # noqa: S603,S607
+        subprocess.Popen(console_command(plan), cwd=cwd, creationflags=CREATE_NEW_CONSOLE)  # noqa: S603
         return True
     if MAC:
         line = (f"cd {shlex.quote(cwd)}; " if cwd else "") + (plan.shell or shlex.join(plan.argv))
