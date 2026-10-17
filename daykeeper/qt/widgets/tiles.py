@@ -20,7 +20,7 @@ from PySide6.QtGui import QColor, QFontMetrics, QHelpEvent, QKeyEvent, QMouseEve
 from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
 from ...layout import TILE_MARGIN, TILE_MIN_WIDTH, tile_columns
-from .. import theme
+from .. import icons, theme
 from ..errors import guard_events
 
 GAP = 12  # px between tiles
@@ -58,6 +58,32 @@ def rounded(p: QPainter, rect: QRectF, radius: float, fill: str, border: str | N
 
 def elide(fm: QFontMetrics, text: str, width: int) -> str:
     return fm.elidedText(text, Qt.TextElideMode.ElideRight, max(0, width))
+
+
+def glyph_px(fm: QFontMetrics) -> int:
+    """The side of a drawn icon that sits in a line of this font."""
+    return max(10, round(fm.height() * 0.8))
+
+
+def glyph_text_width(fm: QFontMetrics, text: str) -> int:
+    """The width of `text` as glyph_text draws it: a leading glyph is an icon and a gap."""
+    name, rest = icons.split(text)
+    return fm.horizontalAdvance(rest) + (glyph_px(fm) + 5 if name else 0)
+
+
+def glyph_text(p: QPainter, rect: QRect, text: str, fm: QFontMetrics, colour: str, align: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignLeft) -> None:
+    """Draw "▶ Run": the drawn icon of the leading glyph, then the text, in `colour`, in the
+    painter's font, vertically centred in `rect`; `align` left or centre, elided to fit."""
+    name, rest = icons.split(text)
+    side = glyph_px(fm) if name else 0
+    width = min(rect.width(), glyph_text_width(fm, text))
+    x = rect.x() + (rect.width() - width) // 2 if align & Qt.AlignmentFlag.AlignHCenter else rect.x()
+    if name:
+        icons.paint(p, name, QRect(x, rect.y(), side, rect.height()), colour, size=side)
+        x += side + 5
+    p.setPen(QColor(colour))
+    room = rect.right() + 1 - x
+    p.drawText(QRect(x, rect.y(), room, rect.height()), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), elide(fm, rest, room))
 
 
 @guard_events

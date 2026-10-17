@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QRectF, QSize, Qt
+from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QListWidget, QListWidgetItem, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QWidget
 
-from .. import theme
+from .. import icons, theme
 
 COUNT_ROLE = Qt.ItemDataRole.UserRole + 1
 KEY_ROLE = Qt.ItemDataRole.UserRole + 2
+ROW_ICON = 15  # px, the drawn icon of a row whose text starts with a glyph
 
 
 class CountDelegate(QStyledItemDelegate):
@@ -33,8 +34,13 @@ class CountDelegate(QStyledItemDelegate):
         cw = fm.horizontalAdvance(count) + 10 if count else 0
         painter.setPen(QColor(t.MUTED))
         painter.drawText(r.adjusted(0, 0, -8, 0), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight), count)
+        glyph, text = icons.split(str(index.data() or ""))
+        left = 8
+        if glyph is not None:  # "  📎 With files": the drawn icon, then the text
+            icons.paint(painter, glyph, QRect(r.x() + left + 4, r.y(), ROW_ICON, r.height()), t.MUTED, size=ROW_ICON)
+            left += ROW_ICON + 12
         painter.setPen(QColor(t.TEXT))
-        painter.drawText(r.adjusted(8, 0, -cw - 8, 0), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), fm.elidedText(str(index.data() or ""), Qt.TextElideMode.ElideRight, r.width() - cw - 16))
+        painter.drawText(r.adjusted(left, 0, -cw - 8, 0), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), fm.elidedText(text, Qt.TextElideMode.ElideRight, r.width() - cw - left - 8))
         painter.restore()
 
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex) -> QSize:

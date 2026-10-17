@@ -135,6 +135,18 @@ class QtFullSmokeTest(unittest.TestCase):
         self.assertEqual(len(win.vault.notes.notes), 1)
         self.assertIn("Redone", win.main_screen.status.text())
 
+    def test_the_tabs_carry_drawn_icons_not_emoji(self):
+        from PySide6.QtCore import Qt
+
+        bar = self.win.main_screen
+        bar.set_compact(False)
+        for mode, btn in bar.tab_buttons.items():
+            self.assertFalse(btn.icon().isNull(), mode)
+            self.assertTrue(btn.text()[:1].isalpha(), f"{mode}: {btn.text()!r} starts with its name, not a glyph")
+        bar.set_compact(True)
+        btn = bar.tab_buttons["vault"]
+        self.assertEqual((btn.text(), btn.toolButtonStyle()), ("", Qt.ToolButtonStyle.ToolButtonIconOnly))
+
     def test_tab_shortcuts(self):
         win = self.win
         win.show_tab_number(4)

@@ -7,7 +7,7 @@ import unittest
 from unittest import mock
 
 from tests.helpers import reset_globals
-from tests.qt_helpers import close_window, open_window, pump, qt_app, require_qt, type_text
+from tests.qt_helpers import close_window, open_window, pump, qt_app, require_qt, type_text, wait_until
 
 require_qt()
 
@@ -81,6 +81,15 @@ class JournalPageTest(unittest.TestCase):
         append_inbox(inbox, column.id, ["INB-7"])
         self.win.pull_inbox(loud=True)
         self.assertIn("INB-7", self.page.sections[column.id].toPlainText(), self.win.main_screen.status.text())
+
+    def test_a_line_written_by_a_session_comes_in_by_itself(self):
+        inbox = inbox_path_for(self.win.vault_path)
+        column = current_layout().visible_columns()[0]
+        append_inbox(inbox, column.id, ["INB-8"])
+        self.assertTrue(wait_until(lambda: "INB-8" in self.page.sections[column.id].toPlainText(), 5000), "the watcher saw the new inbox")
+        self.assertFalse(inbox.exists(), "the inbox was taken")
+        append_inbox(inbox, column.id, ["INB-9"])
+        self.assertTrue(wait_until(lambda: "INB-9" in self.page.sections[column.id].toPlainText(), 5000), "and the next one")
 
 
 if __name__ == "__main__":

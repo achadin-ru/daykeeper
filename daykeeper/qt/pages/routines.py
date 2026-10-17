@@ -23,19 +23,21 @@ from ... import palette
 from ...i18n import _
 from ...routines import KINDS, RUN_LOG_KEEP, SCRIPT_CHANGED, SCRIPT_UNKNOWN, WEEKDAYS, Routine, Schedule, accept_script, check_script, describe_schedule, launch_plan, now_local, risky_location, subtitle
 from ...runner import Run, open_in_console
-from .. import theme
+from .. import icons, theme
 from ..dialogs.base import Dialog, ask_yes_no, button, label, paint_caption, register, show_warning
 from ..dialogs.fileview import open_with_system, show_in_folder
+from ..jobs import Waker
 from ..timers import Ticker
-from ..widgets.common import divider, fill_menu, scroll_area, section
+from ..widgets.common import IconLabel, divider, fill_menu, scroll_area, section
 from ..widgets.countlist import COUNT_ROLE, count_list
-from ..widgets.tiles import Item, TileBoard, TilePainter, elide, rounded
+from ..widgets.tiles import Item, TileBoard, TilePainter, elide, glyph_text, glyph_text_width, rounded
 from ..widgets.toast import Toast
 from .base import TabPage
 from ..errors import guard_events
 
 SCHEDULE_TICK_MS = 20_000
-PUMP_MS = 300
+MORE_ICON = 16  # the ⋯ of a tile, px
+CLOCK_MS = 1000  # the seconds of a running routine on its tile and in its output window
 UNLOCK_DELAY_MS = 800  # the auto runs of an unlock wait for the main screen to be on screen
 KIND_LABELS = {"script": "Script", "command": "Command", "url": "Link", "folder": "Folder", "file": "File"}
 KIND_COLOURS = {"script": "", "command": "#4B5563", "url": "#0D9488", "folder": "#16A34A", "file": "#7C3AED"}  # "": the theme's link colour
@@ -70,7 +72,7 @@ class OutputWindow(QWidget):
         col.setSpacing(0)
         bar = QHBoxLayout()
         bar.setContentsMargins(14, 10, 14, 10)
-        head = label(f"{run.routine.avatar()}  {run.routine.name}", "", self)
+        head = IconLabel(f"{run.routine.avatar()}  {run.routine.name}", "", self, size=18)
         head.setFont(theme.font(13, bold=True))
         bar.addWidget(head)
         self.state = label("", "muted", self)
@@ -131,16 +133,18 @@ class OutputWindow(QWidget):
 
 class RoutineRuns:
     """The runs of routines through the life of the window: the log of runs, their output
-    windows, the schedule tick and the pump that takes the lines of running processes.
-    Made once with the window and kept through a lock."""
+    windows, the schedule tick, and the pump that takes the lines of running processes as
+    their threads report them (a Waker, not a timer). The clock ticks only while a run is
+    on. Made once with the window and kept through a lock."""
 
     def __init__(self, shell: Any):
         self.shell = shell
         self.runs: list[Run] = []
         self._windows: dict[int, OutputWindow] = {}
-        self.tickers = (Ticker(shell, SCHEDULE_TICK_MS, self._tick), Ticker(shell, PUMP_MS, self._pump))
-        for ticker in self.tickers:
-            ticker.start()
+        self._wake = Waker(self._pump, owner=shell)
+        self._clock = Ticker(shell, CLOCK_MS, self._tick_clock)
+        self.tickers = (Ticker(shell, SCHEDULE_TICK_MS, self._tick), self._clock)
+        self.tickers[0].start()
 
     @property
     def page(self) -> RoutinesPage | None:
@@ -182,10 +186,12 @@ class RoutineRuns:
             r.mark_finished(0)
         elif r.terminal:
             if not open_in_console(plan):
-                self.runs.insert(0, Run(r, plan.argv, plan.shell, plan.cwd))
+                self.runs.insert(0, Run(r, plan.argv, plan.shell, plan.cwd, notify=self._wake))
+                self._clock.start()
         else:
-            run = Run(r, plan.argv, plan.shell, plan.cwd, auto=auto)
+            run = Run(r, plan.argv, plan.shell, plan.cwd, auto=auto, notify=self._wake)
             self.runs.insert(0, run)
+            self._clock.start()
             del self.runs[RUN_LOG_KEEP:]
             if run.ended is not None:  # could not start
                 self._finish(run, auto)
@@ -217,11 +223,18 @@ class RoutineRuns:
             self.shell.mark_dirty(None)
         return True
 
+    def _tick_clock(self) -> bool:
+        running = [run for run in self.runs[:20] if run.running]
+        for run in running:
+            self._update_tile(run.routine)
+            window = self._windows.get(id(run))
+            if window is not None:
+                window.refresh()
+        return bool(running)
+
     def _pump(self) -> None:
         changed = False
         for run in list(self.runs[:20]):
-            if run.running:
-                self._update_tile(run.routine)  # the seconds tick on the tile
             for kind, value in run.take():
                 if kind == "line":
                     window = self._windows.get(id(run))
@@ -323,7 +336,7 @@ class RoutinePainter(TilePainter):
         return [first, elide(fm, " ".join(rest), room)]
 
     def _title_room(self, width: int) -> int:
-        more_w = self.fm["title"].horizontalAdvance("⋯") + 8
+        more_w = MORE_ICON + 8
         return width - 2 * PAD_X - BADGE - 12 - more_w
 
     def height(self, r: Routine, width: int) -> int:
@@ -342,13 +355,13 @@ class RoutinePainter(TilePainter):
         x = rect.x() + PAD_X
         out = []
         for tag, text in ((("stop", _("■ Stop")) if busy else ("run", _("▶ Run"))), *((("output", _("Output")),) if has_run else ())):
-            w = self.fm["row"].horizontalAdvance(text)
+            w = glyph_text_width(self.fm["row"], text)
             out.append((tag, text, QRect(x, y, w, self.fm["row"].lineSpacing())))
             x += w + ACTION_GAP
         return out
 
     def zones(self, r: Routine, rect: QRect) -> list[tuple[str, QRect]]:
-        more_w = self.fm["title"].horizontalAdvance("⋯") + 8
+        more_w = MORE_ICON + 8
         out = [("more", QRect(rect.right() - PAD_X - more_w, rect.y() + PAD_Y - 4, more_w + 6, self.fm["title"].height() + 6))]
         out += [(tag, r_.adjusted(-3, -2, 3, 2)) for tag, _t, r_ in self._actions(r, rect)]
         tx = rect.x() + PAD_X + BADGE + 12
@@ -365,13 +378,14 @@ class RoutinePainter(TilePainter):
         x0, y0, right = rect.x() + PAD_X, rect.y() + PAD_Y, rect.right() - PAD_X
         badge = QRect(x0, y0, BADGE, BADGE)
         rounded(p, QRectF(badge), BADGE_RADIUS, theme.blend(colour, t.TILE, 0.14))
-        p.setFont(self.f["avatar"])
-        p.setPen(QColor(colour))
-        p.drawText(badge, int(Qt.AlignmentFlag.AlignCenter), r.avatar())
+        if not r.icon.strip() and icons.name_of(r.avatar()):  # the kind's glyph: drawn; one the user typed stays text
+            icons.paint(p, r.avatar(), badge, colour, size=BADGE * 0.5)
+        else:
+            p.setFont(self.f["avatar"])
+            p.setPen(QColor(colour))
+            p.drawText(badge, int(Qt.AlignmentFlag.AlignCenter), r.avatar())
         p.setFont(self.f["title"])
-        p.setPen(QColor(t.MUTED))
-        more = self.zones(r, rect)[0][1]
-        p.drawText(more, int(Qt.AlignmentFlag.AlignCenter), "⋯")
+        icons.paint(p, "more", self.zones(r, rect)[0][1], t.MUTED, size=MORE_ICON)
         tx = x0 + BADGE + 12
         th = self.fm["title"].lineSpacing()
         y = y0
@@ -389,22 +403,19 @@ class RoutinePainter(TilePainter):
             y += GAP
             cx, ch = x0, self.fm["small"].lineSpacing() + 2 * CHIP_PAD_Y
             for chip in chips:
-                cw = self.fm["small"].horizontalAdvance(chip) + 2 * CHIP_PAD_X
+                cw = glyph_text_width(self.fm["small"], chip) + 2 * CHIP_PAD_X
                 if cx + cw > right and cx > x0:
                     break
                 rounded(p, QRectF(cx, y, cw, ch), CHIP_RADIUS, t.ACCENT_SOFT)
-                p.setPen(QColor(t.ACCENT_INK))
-                p.drawText(QRect(cx, y, cw, ch), int(Qt.AlignmentFlag.AlignCenter), chip)
+                glyph_text(p, QRect(cx, y, cw, ch), chip, self.fm["small"], t.ACCENT_INK, Qt.AlignmentFlag.AlignHCenter)
                 cx += cw + CHIP_GAP
             y += ch
         y += GAP
         text, status_colour, _busy, _has_run = self.page.run_status(r)
-        p.setPen(QColor(status_colour))
-        p.drawText(QRect(x0, y, right - x0, self.fm["small"].lineSpacing()), int(Qt.AlignmentFlag.AlignLeft), elide(self.fm["small"], text, right - x0))
+        glyph_text(p, QRect(x0, y, right - x0, self.fm["small"].lineSpacing()), text, self.fm["small"], status_colour)
         p.setFont(self.f["row"])
-        p.setPen(QColor(t.LINK))
         for _tag, action, ar in self._actions(r, rect):
-            p.drawText(ar, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), action)
+            glyph_text(p, ar, action, self.fm["row"], t.LINK)
 
     def tip(self, r: Routine, zone: str) -> str:
         if zone != "sub":

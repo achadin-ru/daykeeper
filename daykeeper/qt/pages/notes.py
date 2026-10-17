@@ -26,10 +26,10 @@ from ...i18n import _, fmt_day, hotkeys
 from ...journal import today
 from ...layout import CARD_GAP, CARD_MIN_WIDTH, column_width, flow_layout
 from ...notes import MAX_SIZE, NOTE_COLORS, Attachment, Note, NoteItem
-from .. import theme
+from .. import icons, theme
 from ..dialogs.base import ask_yes_no, button, label, show_warning
 from ..timers import IdleOnce
-from ..widgets.common import scroll_area, section
+from ..widgets.common import scroll_area, search_field, section
 from ..widgets.countlist import COUNT_ROLE, KEY_ROLE, add_count_item, count_list
 from .base import TabPage
 from ..errors import guard_events
@@ -44,6 +44,9 @@ PAD_Y = 10
 CHECK = 18
 TEXT_X = 26
 RM_W = 18
+PIN_ICON = 18  # px, the pin of a note
+FOOT_ICON = 17  # px, ⋯, the palette and the clip under a note
+FILE_ICON = 16  # px, before the name of an attached file
 ROW_PAD = 3
 PREVIEW_LINES = 8
 PREVIEW_CHARS = 1200
@@ -141,7 +144,7 @@ class NoteCard(QWidget):
         self.zones, self.boxes = [], {}
         w = self._width
         y = PAD_Y
-        pin_w = fm["icon"].horizontalAdvance("📌") + 4
+        pin_w = PIN_ICON + 4
         title_h = max(self._wrap_h("title", note.title or _("Title"), w - 2 * PAD - 34), fm["title"].height())
         self._title_rect = QRect(PAD, y, w - 2 * PAD - 34, title_h)
         self._pin_rect = QRect(w - PAD - pin_w, y, pin_w, fm["icon"].height())
@@ -195,7 +198,7 @@ class NoteCard(QWidget):
         if note.attachments:
             y += 12
             for att in note.attachments:
-                text_h = self._wrap_h("item", f"📄  {att.name}", w - 2 * PAD - 40)
+                text_h = self._wrap_h("item", att.name, w - 2 * PAD - 40 - FILE_ICON - 8)
                 row = QRect(PAD, y, w - 2 * PAD, text_h + 8)
                 self._files.append((att, row))
                 self._zone(QRect(w - PAD - RM_W - 4, y, RM_W + 4, row.height()), "frm", att)
@@ -222,7 +225,7 @@ class NoteCard(QWidget):
         foot_bottom = y + fm["small"].height()
         for kind, glyph, gap in (("more", "⋯", 0), ("colour", "🎨", 9), ("attach", "📎", 9)):
             right -= gap
-            gw = fm["icon"].horizontalAdvance(glyph) + 2
+            gw = FOOT_ICON + 4
             r = QRect(right - gw, y - 3, gw, fm["icon"].height())
             self._foot.append((kind, r, glyph))
             self._zone(r.adjusted(-3, -2, 3, 2), kind, None)
@@ -314,9 +317,8 @@ class NoteCard(QWidget):
             p.setFont(self.f["title"])
             p.setPen(QColor(t.TEXT if note.title else t.MUTED))
             p.drawText(self._title_rect, WRAP, note.title or _("Title"))
-        p.setFont(self.f["icon"])
-        p.setPen(QColor(t.TEXT if note.pinned else t.MUTED))
-        p.drawText(self._pin_rect, int(Qt.AlignmentFlag.AlignRight), "📌" if note.pinned else "📍")
+        pin = QRect(self._pin_rect.right() + 1 - PIN_ICON, self._pin_rect.y(), PIN_ICON, self._pin_rect.height())
+        icons.paint(p, "pin" if note.pinned else "pin_off", pin, t.TEXT if note.pinned else t.MUTED, size=PIN_ICON)
         if hidden != ("text", None):
             p.setFont(self.f["text"])
             p.setPen(QColor(t.TEXT if note.text else t.MUTED))
@@ -372,18 +374,20 @@ class NoteCard(QWidget):
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawRoundedRect(QRectF(r).adjusted(0.5, 0.5, -0.5, -0.5), 6, 6)
             p.setFont(self.f["item"])
-            p.setPen(QColor(t.TEXT if exists else t.MUTED))
+            ink = t.TEXT if exists else t.MUTED
             icon = FILE_ICONS.get(att.suffix, "📄") if exists else "⚠"
-            p.drawText(r.adjusted(8, 4, -40, -4), WRAP, f"{icon}  {att.name}")
+            icons.paint(p, icon, QRect(r.x() + 8, r.y() + 4, FILE_ICON, self.fm["item"].height()), t.MUTED if exists else t.DANGER, size=FILE_ICON)
+            p.setPen(QColor(ink))
+            p.drawText(r.adjusted(8 + FILE_ICON + 8, 4, -40, -4), WRAP, att.name)
             p.setFont(self.f["small"])
             p.setPen(QColor(t.MUTED))
             p.drawText(r.adjusted(0, 5, -8, 0), int(Qt.AlignmentFlag.AlignRight), "✕")
         for kind, rect, text in self._foot:
             r = rect.translated(0, s)
             if kind in ("more", "colour", "attach"):
-                p.setFont(self.f["icon"])
-                p.setPen(QColor(t.TEXT if self.hot is not None and self.hot[0] == kind else t.MUTED))
-            elif kind == "carry":
+                icons.paint(p, text, r, t.TEXT if self.hot is not None and self.hot[0] == kind else t.MUTED, size=FOOT_ICON)
+                continue
+            if kind == "carry":
                 p.setFont(self.f["small_bold"])
                 p.setPen(QColor(accent))
             else:
@@ -855,7 +859,7 @@ class NotesPage(TabPage):
         self.metrics = {k: QFontMetrics(v) for k, v in self.fonts.items()}
         _splitter, left, col, right = self.split(300, 240)
         self.search = QLineEdit(left)
-        self.search.setPlaceholderText(_("🔍 Search notes"))
+        search_field(self.search, _("🔍 Search notes"))
         self.search.setToolTip(_("Search across all days: title, text, items, file names"))
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(lambda _t: self.render_notes())

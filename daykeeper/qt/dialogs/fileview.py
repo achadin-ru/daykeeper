@@ -25,7 +25,7 @@ from ...i18n import MAC, _
 from ...markdown import Block, parse, table_lines, toggle_task
 from .. import theme
 from .base import ask_yes_no, button, label, paint_caption, register, show_error
-from ..widgets.common import divider, icon_button
+from ..widgets.common import IconLabel, divider, icon_button
 from ..errors import guard_events
 
 MD_SUFFIXES = {".md", ".markdown", ".mdown"}
@@ -94,7 +94,7 @@ class FileViewer(QWidget):
         col.setSpacing(0)
         bar = QHBoxLayout()
         bar.setContentsMargins(16, 10, 16, 4)
-        head = label(("📝 " if self.is_md else "📄 ") + self.path.name, "", self)
+        head = IconLabel(("📝 " if self.is_md else "📄 ") + self.path.name, "", self, size=18)
         head.setFont(theme.font(13, bold=True))
         bar.addWidget(head)
         bar.addStretch(1)

@@ -2,7 +2,8 @@
 thread. A job is `submit`ted with a kind and whatever the caller wants back with the
 answer; `drain` hands the finished ones over as JobResult, an exception as an error
 result. The threads never touch the models — the drain on the window's thread does.
-Pure (no tkinter)."""
+`notify`, when given, is called on the job's thread after each answer is queued (the Qt
+window drains on that call; the Tk one polls). Pure (no tkinter)."""
 
 from __future__ import annotations
 
@@ -30,8 +31,8 @@ class JobResult:
 class JobPool:
     """Threads made on the first job; `drain()` on the window's thread takes the answers."""
 
-    def __init__(self, workers: int = 3, name: str = "jobs"):
-        self.workers, self.name = workers, name
+    def __init__(self, workers: int = 3, name: str = "jobs", notify: Callable[[], None] | None = None):
+        self.workers, self.name, self.notify = workers, name, notify
         self._pool: ThreadPoolExecutor | None = None
         self._results: queue.Queue = queue.Queue()
         self._out = 0  # jobs submitted and not yet drained
@@ -52,6 +53,8 @@ class JobPool:
                 self._results.put(JobResult(kind, meta, fn(*args)))
             except BaseException as exc:  # noqa: BLE001 — the answer carries the error; a thread must not die silently
                 self._results.put(JobResult(kind, meta, None, exc))
+            if self.notify is not None:
+                self.notify()
 
         self._pool.submit(work)
 

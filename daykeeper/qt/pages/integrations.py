@@ -37,10 +37,11 @@ from ...bookmarks import entry_secret
 from ...gitlab import INTERVALS, RULES, Event, GitLabError, check as gitlab_check
 from ...i18n import _
 from ...jobs import JobPool
-from .. import theme
+from .. import icons, theme
 from ..dialogs.base import button, label
+from ..jobs import Waker
 from ..timers import Ticker
-from ..widgets.common import scroll_area, section
+from ..widgets.common import IconLabel, scroll_area, section, with_icon
 from ..widgets.countlist import count_list
 from ..widgets.flow import flow_host
 from ..widgets.toast import Toast
@@ -71,11 +72,11 @@ class GitLabWatcher:
 
     def __init__(self, shell: Any):
         self.shell = shell
-        self._jobs = JobPool(workers=1, name="gitlab")
+        self._wake = Waker(self._drain, owner=shell)  # the answer is taken as it comes
+        self._jobs = JobPool(workers=1, name="gitlab", notify=self._wake)
         self._busy = False
         self.status = ""
-        self._ticker = Ticker(shell, POLL_TICK_MS, self._tick)
-        self._drainer = Ticker(shell, 300, self._drain)  # runs while a check is out
+        self._ticker = Ticker(shell, POLL_TICK_MS, self._tick)  # is a check due by the clock
         self._ticker.start()
 
     @property
@@ -84,7 +85,7 @@ class GitLabWatcher:
 
     def close(self) -> None:
         self._ticker.stop()
-        self._drainer.stop()
+        self._wake.close()
         self._jobs.close()
 
     def _token(self) -> str:
@@ -93,7 +94,6 @@ class GitLabWatcher:
         return entry_secret(entry) if entry is not None else ""
 
     def _tick(self) -> None:
-        self._drain()
         vault = self.shell.vault
         if vault is None or self._busy or not self.shell.background_jobs or not self.shell.tab_on("integrations"):
             return
@@ -119,16 +119,15 @@ class GitLabWatcher:
         integ = vault.integrations
         old = dict(integ.gitlab_state)
         self._jobs.submit("check", gitlab_check, gl.url, token, settings, old, None, integ.since(time.time()), quiet=quiet)
-        self._drainer.start()
 
-    def _drain(self) -> bool:
+    def _drain(self) -> None:
         results = self._jobs.drain()
         if not results:
-            return self._busy
+            return
         self._busy = False
         vault = self.shell.vault
         if vault is None:
-            return False
+            return
         integ = vault.integrations
         result = results[-1]
         if not result.ok:
@@ -136,7 +135,7 @@ class GitLabWatcher:
             integ.note_failed_check(time.time())
             self.set_status(_("Check failed: {error}").format(error=_(str(exc) if isinstance(exc, GitLabError) else repr(exc))))
             self.shell.mark_dirty("integrations")
-            return False
+            return
         found = result.value
         first = integ.apply_check(found, time.time())
         if found.events:
@@ -150,7 +149,6 @@ class GitLabWatcher:
         page = self.page
         if page is not None:
             page.render_feed()
-        return False
 
     def _notify(self, events: list[Event]) -> None:
         for ev in events[:4]:
@@ -217,8 +215,7 @@ class EventDelegate(QStyledItemDelegate):
         painter.drawRoundedRect(box, 10, 10)
         x = r.x() + 12
         painter.setFont(self.f_row)
-        painter.setPen(QColor(t.TEXT))
-        painter.drawText(QRect(x, r.y() + 10, 26, self.fm_row.height()), int(Qt.AlignmentFlag.AlignLeft), EVENT_ICONS.get(ev.kind, "🔔"))
+        icons.paint(painter, EVENT_ICONS.get(ev.kind, "🔔"), QRect(x, r.y() + 10, 18, self.fm_row.height()), t.TEXT, size=18)
         stamp = time.strftime("%d.%m %H:%M", time.localtime(ev.ts))
         sw = self.fm_small.horizontalAdvance(stamp)
         painter.setFont(self.f_small)
@@ -372,7 +369,7 @@ class IntegrationsPage(TabPage):
         gl = integ.gitlab
         body, col = self.settings, self.settings_col
         head = QHBoxLayout()
-        head.addWidget(label("🦊 GitLab", "heading", body))
+        head.addWidget(IconLabel("🦊 GitLab", "heading", body, size=22))
         head.addStretch(1)
         watch = QCheckBox(_("Watch"), body)
         watch.setChecked(gl.enabled)
@@ -431,7 +428,8 @@ class IntegrationsPage(TabPage):
         col.addSpacing(6)
         rules_host, rules = flow_host(body, 18)
         for code, (text, _on) in RULES.items():
-            tick = QCheckBox(f"{EVENT_ICONS[code]}  {_(text)}", rules_host)
+            tick = QCheckBox(rules_host)
+            with_icon(tick, f"{EVENT_ICONS[code]}  {_(text)}")
             tick.setChecked(gl.rule(code))
 
             def flip(on: bool, c: str = code) -> None:

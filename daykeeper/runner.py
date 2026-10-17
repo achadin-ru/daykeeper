@@ -35,11 +35,13 @@ def decode_line(raw: bytes) -> str:
 
 class Run:
     """One run of a routine in a background thread; lines and the end come through a
-    queue as ("line", text) and ("end", exit code). `auto` — started by the schedule."""
+    queue as ("line", text) and ("end", exit code). `auto` — started by the schedule.
+    `notify`, when given, is called on the reading thread after each thing it queues."""
 
-    def __init__(self, routine: Any, argv: list[str] | None, shell: str, cwd: str, auto: bool = False):
+    def __init__(self, routine: Any, argv: list[str] | None, shell: str, cwd: str, auto: bool = False, notify: Any = None):
         self.routine = routine
         self.auto = auto
+        self.notify = notify
         self.started = time.time()
         self.ended: float | None = None
         self.code: int | None = None
@@ -73,9 +75,15 @@ class Run:
             return
         for raw in iter(self.proc.stdout.readline, b""):
             self.queue.put(("line", decode_line(raw).rstrip("\r\n")))
+            self._notify()
         self.proc.wait()
         self.proc.stdout.close()
         self.queue.put(("end", self.proc.returncode))
+        self._notify()
+
+    def _notify(self) -> None:
+        if self.notify is not None:
+            self.notify()
 
     def stop(self) -> None:
         """End the run with everything it started: `cmd /c x.bat` or `powershell -File` run

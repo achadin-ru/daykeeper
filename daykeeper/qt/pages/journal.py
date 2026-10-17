@@ -15,7 +15,7 @@ from ...journal import DEFAULT_OTHER, Day, build_report, inbox_path_for, parse_a
 from ...journal_layout import ROLE_MR, current as current_layout
 from .. import theme
 from ..dialogs.base import Dialog, ask_yes_no, button, label
-from ..widgets.common import more_button, popup_below, scroll_area, section
+from ..widgets.common import more_button, popup_below, scroll_area, section, with_icon
 from ..widgets.countlist import COUNT_ROLE, KEY_ROLE, add_count_item, count_list
 from ..widgets.flow import flow_host
 from .base import TabPage
@@ -87,7 +87,8 @@ class JournalPage(TabPage):
         line.setFixedHeight(1)
         rl.addWidget(line)
         rl.addWidget(actions_host)
-        report = button(_("📋  Build report"), "primary", actions_host)
+        report = button("", "primary", actions_host)
+        with_icon(report, _("📋  Build report"), on_accent=True)
         report.clicked.connect(self.report_dialog)
         actions.addWidget(report)
         inbox_btn = button(_("Read the inbox now"), "small", actions_host)
@@ -124,7 +125,8 @@ class JournalPage(TabPage):
         al.addWidget(self.quick)
         quick.addWidget(add)
         for c in columns:
-            b = button(_(c.button or c.label), "small", quick_host)
+            b = button("", "small", quick_host)
+            with_icon(b, _(c.button or c.label))
             b.clicked.connect(lambda _x=False, cid=c.id: self._quick_add(cid))
             quick.addWidget(b)
         if kinds:

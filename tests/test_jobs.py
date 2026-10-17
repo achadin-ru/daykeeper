@@ -57,6 +57,19 @@ class JobPoolTest(unittest.TestCase):
         self.assertEqual(values, list(range(20)))
         pool.close()
 
+    def test_notify_comes_after_each_answer_is_queued(self):
+        seen: list[int] = []
+        pool = JobPool(workers=2, notify=lambda: seen.append(len(pool._results.queue)))
+        for i in range(5):
+            pool.submit("n", lambda v: v, i)
+        self.assertEqual(len(wait_for(pool, 5)), 5)
+        end = time.monotonic() + 2
+        while len(seen) < 5 and time.monotonic() < end:
+            time.sleep(0.01)
+        self.assertEqual(len(seen), 5)
+        self.assertTrue(all(n >= 1 for n in seen), "the answer is there when notify is called")
+        pool.close()
+
 
 if __name__ == "__main__":
     unittest.main()

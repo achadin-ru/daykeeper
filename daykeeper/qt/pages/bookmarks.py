@@ -30,10 +30,11 @@ from ... import siteicon
 from ...bookmarks import TILE_COLORS, Bookmark, entry_login, entry_secret, entry_url, has_secret, host_of, is_web, normalize_url
 from ...i18n import _
 from ...jobs import JobPool
-from .. import theme
+from .. import icons, theme
 from ..dialogs.base import Dialog, ask_text, ask_yes_no, button, label, show_error, show_info
-from ..timers import Debounce, Ticker
-from ..widgets.common import fill_menu, more_button, scroll_area
+from ..jobs import Waker
+from ..timers import Debounce
+from ..widgets.common import fill_menu, more_button, scroll_area, search_field
 from ..widgets.countlist import KEY_ROLE, add_count_item, count_list
 from ..widgets.tiles import Item, TileBoard, TilePainter, elide, rounded
 from .base import TabPage
@@ -44,6 +45,9 @@ REVEAL_SEC = 10
 RADIUS, ROW_RADIUS, BADGE_RADIUS = 12, 7, 11
 BADGE = 40  # px
 ICON_SIZE = 26  # the site icon on a badge, px at 100 %
+ROW_ICON = 14  # the drawn icons of the login and password rows, px
+MORE_ICON = 16  # the ⋯ of a tile
+LINK_ICON = 12  # before the name of the vault entry a bookmark is tied to
 PAD_X, PAD_Y = 14, 12
 TITLE_GAP = 4
 ROWS_GAP, ROW_PAD, ROW_GAP = 14, 14, 4
@@ -104,15 +108,15 @@ class BookmarkPainter(TilePainter):
         g: dict[str, QRect] = {}
         x0, y0, right = r.x() + PAD_X, r.y() + PAD_Y, r.right() - PAD_X
         g["badge"] = QRect(x0, y0, BADGE, BADGE)
-        more_w = self.fm["title"].horizontalAdvance("⋯") + 8
+        more_w = MORE_ICON + 8
         g["more"] = QRect(right - more_w, y0 - 4, more_w + 6, self.fm["title"].height() + 6)
         y = y0 + BADGE + ROWS_GAP
         rh = self.row_height()
         for row in self.rows(bm):
             g[row] = QRect(x0, y, right - x0, rh)
             if row == "secret":
-                eye_w = self.fm["row"].horizontalAdvance("👁") + 12
-                copy_w = self.fm["row"].horizontalAdvance("⧉") + 14
+                eye_w = ROW_ICON + 12
+                copy_w = ROW_ICON + 14
                 g["eye"] = QRect(right - copy_w - eye_w, y, eye_w, rh)
             y += rh + ROW_GAP
         entry = self.entry(bm)
@@ -120,7 +124,7 @@ class BookmarkPainter(TilePainter):
             y += FOOT_GAP - (ROW_GAP if self.rows(bm) else 0)
             fh = self.foot_height()
             if has_secret(entry):
-                both_w = self.fm["button"].horizontalAdvance("↗ + 🔑") + 8
+                both_w = 2 * ROW_ICON + self.fm["button"].horizontalAdvance(" + ") + 8
                 g["both"] = QRect(right - 36 - both_w, y, both_w + 8, fh)
             g["link"] = QRect(x0, y, (g["both"].x() - x0 - 12) if "both" in g else right - x0, fh)
         return g
@@ -146,9 +150,7 @@ class BookmarkPainter(TilePainter):
             p.setFont(self.f["avatar"])
             p.setPen(QColor(colour))
             p.drawText(g["badge"], int(Qt.AlignmentFlag.AlignCenter), bm.avatar())
-        p.setFont(self.f["title"])
-        p.setPen(QColor(t.MUTED))
-        p.drawText(g["more"], int(Qt.AlignmentFlag.AlignCenter), "⋯")
+        icons.paint(p, "more", g["more"], t.MUTED, size=MORE_ICON)
         tx = g["badge"].right() + 13
         room = g["more"].x() - tx
         th, hh = self.fm["title"].height(), self.fm["host"].height()
@@ -164,33 +166,34 @@ class BookmarkPainter(TilePainter):
             self._paint_row(p, row, g[row], bm, entry)
         if entry is not None:
             if "both" in g:
+                b = g["both"]
+                plus = self.fm["button"].horizontalAdvance(" + ")
+                icons.paint(p, "key", QRect(b.right() - ROW_ICON, b.y(), ROW_ICON, b.height()), t.LINK, size=ROW_ICON)
                 p.setFont(self.f["button"])
                 p.setPen(QColor(t.LINK))
-                p.drawText(g["both"], int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight), "↗ + 🔑")
+                p.drawText(QRect(b.right() - ROW_ICON - plus, b.y(), plus, b.height()), int(Qt.AlignmentFlag.AlignCenter), " + ")
+                icons.paint(p, "external", QRect(b.right() - 2 * ROW_ICON - plus, b.y(), ROW_ICON, b.height()), t.LINK, size=ROW_ICON)
+            link = g["link"]
+            icons.paint(p, "link", QRect(link.x(), link.y(), LINK_ICON, link.height()), t.MUTED, size=LINK_ICON)
             p.setFont(self.f["host"])
             p.setPen(QColor(t.MUTED))
-            p.drawText(g["link"], int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), elide(self.fm["host"], "🔗 " + entry.name, g["link"].width()))
+            room = link.width() - LINK_ICON - 5
+            p.drawText(QRect(link.x() + LINK_ICON + 5, link.y(), room, link.height()), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), elide(self.fm["host"], entry.name, room))
 
     def _paint_row(self, p: QPainter, row: str, r: QRect, bm: Bookmark, entry) -> None:
         t = theme.current()
         rounded(p, QRectF(r), ROW_RADIUS, t.CRED_BG)
-        fm = self.fm["row"]
-        p.setFont(self.f["row"])
-        icon = {"login": "👤", "secret": "🔑", "locked": "🔒"}[row]
-        p.setPen(QColor(t.TEXT))
-        p.drawText(r.adjusted(8, 0, 0, 0), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), icon)
+        icon = {"login": "user", "secret": "key", "locked": "padlock"}[row]
+        icons.paint(p, icon, QRect(r.x() + 8, r.y(), ROW_ICON, r.height()), t.TEXT, size=ROW_ICON)
         end = r.right() - 8
         if row != "locked":
-            p.setPen(QColor(t.MUTED))
-            p.drawText(QRect(r.x(), r.y(), end - r.x(), r.height()), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight), "⧉")
-            end -= fm.horizontalAdvance("⧉") + 6
+            icons.paint(p, "copy", QRect(end - ROW_ICON, r.y(), ROW_ICON, r.height()), t.MUTED, size=ROW_ICON)
+            end -= ROW_ICON + 6
         revealed = bm.id in self.page.revealed
         if row == "secret":
-            eye = "🙈" if revealed else "👁"
-            p.setPen(QColor(t.TEXT if revealed else t.MUTED))
-            p.drawText(QRect(r.x(), r.y(), end - r.x(), r.height()), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight), eye)
-            end -= fm.horizontalAdvance(eye) + 6
-        tx = r.x() + 8 + fm.horizontalAdvance(icon) + 6
+            icons.paint(p, "eye_off" if revealed else "eye", QRect(end - ROW_ICON, r.y(), ROW_ICON, r.height()), t.TEXT if revealed else t.MUTED, size=ROW_ICON)
+            end -= ROW_ICON + 6
+        tx = r.x() + 8 + ROW_ICON + 6
         if row == "login":
             text, f, ink = entry_login(entry), "row", t.TEXT
         elif row == "secret":
@@ -223,14 +226,14 @@ class BookmarksPage(TabPage):
         self._loading = False
         self.revealed: dict[str, Debounce] = {}  # bookmark id → the timer that hides it again
         self._icons: dict[tuple, QPixmap | None] = {}
-        self._site_jobs = JobPool(workers=3, name="site-icon")
+        self._site_wake = Waker(self._take_sites, owner=self)  # an answer is taken as it comes
+        self._site_jobs = JobPool(workers=3, name="site-icon", notify=self._site_wake)
         self._site_busy: set[str] = set()
         self._small_busy: set[str] = set()
-        self._site_poll = Ticker(self, 250, self._take_sites)
         self._site_on = True
         _splitter, left, col, right = self.split(300, 240)
         self.search = QLineEdit(left)
-        self.search.setPlaceholderText(_("🔍 Search bookmarks"))
+        search_field(self.search, _("🔍 Search bookmarks"))
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(lambda _t: self.refresh_tiles())
         col.addWidget(self.search)
@@ -272,7 +275,7 @@ class BookmarksPage(TabPage):
         for hide in self.revealed.values():
             hide.cancel()
         self.revealed.clear()
-        self._site_poll.stop()
+        self._site_wake.close()
         self._site_jobs.close()
 
     def from_entry(self, entry) -> None:
@@ -527,7 +530,6 @@ class BookmarksPage(TabPage):
                 return b""
 
         self._site_jobs.submit("small", work, bid=bm.id, favicon=bm.favicon, size=size)
-        self._site_poll.start()
 
     def _ask_sites(self, force: Bookmark | None = None) -> None:
         if self.vault is None or not self.shell.background_jobs or not self._site_on:
@@ -551,9 +553,8 @@ class BookmarksPage(TabPage):
                 return info, small
 
             self._site_jobs.submit("site", work, bid=bm.id, url=bm.url)
-            self._site_poll.start()
 
-    def _take_sites(self) -> bool:
+    def _take_sites(self) -> None:
         for result in self._site_jobs.drain():
             bid = result.meta["bid"]
             (self._site_busy if result.kind == "site" else self._small_busy).discard(bid)
@@ -568,7 +569,6 @@ class BookmarksPage(TabPage):
             elif not bm.apply_small_icon(result.meta["favicon"], result.value, result.meta["size"]):
                 continue
             self._repaint(bm)
-        return bool(self._site_busy or self._small_busy)
 
     def _refresh_site(self, bm: Bookmark) -> None:
         bm.site_checked = 0.0

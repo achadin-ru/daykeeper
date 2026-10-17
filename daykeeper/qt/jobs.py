@@ -1,5 +1,6 @@
 """Work on a thread, its answer on the window's thread: the bridge every slow call of the Qt
-window goes through (the master password check now; GitLab, routines and site icons later).
+window goes through: `run_in_thread` for one call (the master password check), `Waker` for
+the pools and processes that keep their answers in a queue (site icons, GitLab, routines).
 
 A widget may be touched only by the GUI thread. `run_in_thread` runs `fn` on a plain
 thread and hands `(result, error)` to `done` through a queued Qt signal, so `done` always
@@ -62,3 +63,63 @@ def run_in_thread(fn: Callable[[], Any], done: Callable[[Any, BaseException | No
 def pending() -> int:
     """Answers not yet delivered (tests wait on it)."""
     return len(_live)
+
+
+class _Hub(QObject):
+    """One for the life of the app, made on the GUI thread by the first Waker: a thread
+    emits on an object that is never deleted, so no thread ever holds the last reference
+    to a Qt object (see _Relay) nor emits on one that is gone."""
+
+    poked = Signal(int)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.wakers: dict[int, Waker] = {}
+        self.waiting: set[int] = set()
+        self.lock = threading.Lock()
+        self.poked.connect(self._deliver)
+
+    def _deliver(self, key: int) -> None:
+        with self.lock:
+            self.waiting.discard(key)
+        waker = self.wakers.get(key)
+        if waker is not None:
+            waker._wake()
+
+
+_hub: _Hub | None = None
+_keys = iter(range(1, 1 << 62))
+
+
+class Waker:
+    """A call from any thread that runs `fn()` on the GUI thread instead of a timer that
+    asks a queue every few hundred ms: JobPool(notify=…) and Run(notify=…) call it after
+    each answer they queue. Calls that come before `fn` has run are one run (a script
+    printing a thousand lines wakes the window once per batch). With `owner`, nothing runs
+    once that object has been deleted; `close` (GUI thread) ends it for good."""
+
+    def __init__(self, fn: Callable[[], Any], owner: QObject | None = None):
+        global _hub
+        if _hub is None:
+            _hub = _Hub()
+        self._hub = _hub
+        self.fn, self._owner = fn, owner
+        self.key = next(_keys)
+        self._hub.wakers[self.key] = self
+
+    def __call__(self) -> None:
+        hub = self._hub
+        with hub.lock:
+            if self.key in hub.waiting or self.key not in hub.wakers:
+                return
+            hub.waiting.add(self.key)
+        hub.poked.emit(self.key)
+
+    def _wake(self) -> None:
+        if self._owner is not None and not shiboken6.isValid(self._owner):
+            self.close()
+            return
+        self.fn()
+
+    def close(self) -> None:
+        self._hub.wakers.pop(self.key, None)

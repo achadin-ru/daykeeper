@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import shiboken6
-from PySide6.QtCore import QEvent, QSize, Qt
+from PySide6.QtCore import QEvent, QFileSystemWatcher, QSize, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLineEdit, QMainWindow, QPlainTextEdit, QStackedWidget, QToolButton, QVBoxLayout, QWidget
 
@@ -43,10 +43,12 @@ from .errors import guard_events
 
 AUTOSAVE_DELAY_MS = 800
 UNDO_SETTLE_MS = 700  # changes this close together are one undo step
-INBOX_POLL_MS = 60_000  # how often the journal inbox is picked up
+INBOX_POLL_MS = 300_000  # a safety net under the watcher (a folder it cannot watch)
+INBOX_SETTLE_MS = 700  # the inbox is read this long after its last change: a writer finishes first
 ERROR_DIALOG_EVERY = 30  # s; an error in a timer repeats, its dialog must not
 MIN_WIDTH, MIN_HEIGHT = 860, 540  # px; the bar of icon-only tabs fits in the width
 BAR_LOGO = 30  # px
+TAB_ICON = 18  # px, the drawn icon of a tab button
 TAB_TIPS = {  # what each tab is for, on hover over its button (the same keys as app.TAB_TIPS)
     "vault": "Logins, tokens and other secrets, encrypted with the master password",
     "bookmarks": "Work sites as tiles; a tile can copy the password of its entry",
@@ -66,6 +68,15 @@ def tab_label(mode: str) -> str:
         "routines": _("⚡  Routine"),
         "integrations": _("🔌  Integrations"),
     }[mode]
+
+
+def tab_name(mode: str) -> str:
+    """The name of a tab without its glyph (the icon is drawn beside it)."""
+    return icons.split(tab_label(mode))[1]
+
+
+def tab_icon(mode: str) -> str:
+    return icons.split(tab_label(mode))[0] or "plain"
 
 
 def page_types() -> dict[str, Any]:
@@ -167,7 +178,9 @@ class MainScreen(QWidget):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
             btn.clicked.connect(lambda _c=False, m=mode: self.shell.show_page(m))
-            name = tab_label(mode).split("  ", 1)[-1]
+            btn.setIcon(icons.rail(tab_icon(mode)))
+            btn.setIconSize(QSize(TAB_ICON, TAB_ICON))
+            name = tab_name(mode)
             keys = f"  ({hotkeys(f'Ctrl+{n}')})" if n <= 9 else ""
             btn.setToolTip((f"{name} — {_(TAB_TIPS[mode])}" if mode in TAB_TIPS else name) + keys)
             self.tabs_row.addWidget(btn)
@@ -178,15 +191,23 @@ class MainScreen(QWidget):
         self.fit_tabs()
 
     def tab_text(self, mode: str, extra: str = "") -> str:
-        text = tab_label(mode)
-        return (text.split("  ", 1)[0] if self.compact else text) + extra
+        """The text beside the tab's icon: none in the compact bar but the unread count."""
+        return extra.strip() if self.compact else tab_name(mode) + extra
+
+    def set_tab_text(self, mode: str, extra: str = "") -> None:
+        btn = self.tab_buttons.get(mode)
+        if btn is None:
+            return
+        text = self.tab_text(mode, extra)
+        btn.setText(text)
+        btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon if text else Qt.ToolButtonStyle.ToolButtonIconOnly)
 
     def set_compact(self, compact: bool) -> None:
         if compact == self.compact:
             return
         self.compact = compact
-        for mode, btn in self.tab_buttons.items():
-            btn.setText(self.tab_text(mode))
+        for mode in self.tab_buttons:
+            self.set_tab_text(mode)
         self.shell.update_integrations_badge()
 
     def fit_tabs(self) -> None:
@@ -240,6 +261,8 @@ class MainWindow(QMainWindow):
         self._clip = SecretClipboard(self._qt_clip_put, self._qt_clip_get, self._qt_clip_clear)
         self._clip_wipe = Debounce(self, CLEAR_SEC * 1000, self._clear_clipboard)
         self._inbox_ticker = Ticker(self, INBOX_POLL_MS, self.pull_inbox)
+        self._inbox_settle = Debounce(self, INBOX_SETTLE_MS, self.pull_inbox)
+        self._inbox_watch = QFileSystemWatcher(self)
         self._children: weakref.WeakSet[QWidget] = weakref.WeakSet()  # windows that close on lock
         self._conflict_told = False
         self._error_told = 0.0
@@ -269,7 +292,7 @@ class MainWindow(QMainWindow):
             from .dialogs.settings_claude import refresh_helper_in_background
 
             refresh_helper_in_background()  # a connected Claude Code hook gets this build's helper
-        self._inbox_ticker.start()
+        self._watch_inbox()
         self._restore_window()
         self.show_unlock()
 
@@ -480,7 +503,7 @@ class MainWindow(QMainWindow):
         if btn is None or self.vault is None:
             return
         n = self.vault.integrations.unread()
-        btn.setText(self.main_screen.tab_text("integrations", f"  ({n})" if n else ""))
+        self.main_screen.set_tab_text("integrations", f"  ({n})" if n else "")
 
     def update_lock_button(self) -> None:
         """“Lock passwords” is there only when the Passwords tab has a guard."""
@@ -619,8 +642,30 @@ class MainWindow(QMainWindow):
             return
         show_info(self, _("Your changes are kept in:\n{path}\n\nIt opens with the same master password: Settings → Data → Copies.").format(path=path))
 
+    def _watch_inbox(self) -> None:
+        """The inbox is picked up as a session writes it: the folder is watched for the file
+        to appear, the file for lines added to it. The slow ticker stays for a folder the
+        system does not report changes of (a network drive)."""
+        folder = str(self.session.inbox_path.parent)
+        if self.session.inbox_path.parent.is_dir() and folder not in self._inbox_watch.directories():
+            self._inbox_watch.addPath(folder)
+        self._inbox_watch.directoryChanged.connect(self._on_inbox_change)
+        self._inbox_watch.fileChanged.connect(self._on_inbox_change)
+        self._inbox_ticker.start()
+        self._on_inbox_change()
+
+    def _on_inbox_change(self, _path: str = "") -> None:
+        inbox = self.session.inbox_path
+        if not inbox.exists():
+            return  # the vault saved, or the inbox was just taken: nothing to read
+        if str(inbox) not in self._inbox_watch.files():
+            self._inbox_watch.addPath(str(inbox))  # dropped by the watcher when the file went
+        if self.vault is not None:
+            self._inbox_settle.touch()
+
     def pull_inbox(self, loud: bool = False) -> None:
-        """Pick up what the sessions wrote into the inbox; the ticker calls this every minute."""
+        """Pick up what the sessions wrote into the inbox: on a change of the file (the
+        watcher), at unlock, by hand, and every five minutes as a safety net."""
         if self.vault is None:
             return
         if self._capture.pending:  # the user's own change waiting to be recorded goes first
@@ -705,7 +750,7 @@ class MainWindow(QMainWindow):
         for name in names_of:
             self._rebuild_page(name)
         self._save.touch()
-        names = ", ".join(tab_label(d).split("  ", 1)[-1] for d in UNDO_DOMAINS if d in touched)
+        names = ", ".join(tab_name(d) for d in UNDO_DOMAINS if d in touched)
         self.set_status((_("Redone: {what}") if redo else _("Undone: {what}")).format(what=names))
 
     # ---- clipboard
@@ -832,9 +877,10 @@ class MainWindow(QMainWindow):
             page.cancel_jobs()
         if self.gitlab is not None:
             self.gitlab.close()
-        for job in (self._save, self._capture):
+        for job in (self._save, self._capture, self._inbox_settle):
             job.cancel()
         self._inbox_ticker.stop()
+        self._inbox_watch.removePaths(self._inbox_watch.files() + self._inbox_watch.directories())
         self.security.ticker.stop()
         event.accept()
 

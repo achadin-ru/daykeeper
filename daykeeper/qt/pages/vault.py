@@ -12,7 +12,7 @@ from __future__ import annotations
 import time
 
 from PySide6.QtCore import QAbstractListModel, QEvent, QModelIndex, QObject, QPersistentModelIndex, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QFontMetrics, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -38,10 +38,10 @@ from ...fieldicons import summary as field_summary
 from ...i18n import _, fmt_time, hotkeys
 from ...security import GUARD_PIN
 from ...vault import DEFAULT_KIND, KINDS, MAIN_GROUP, Entry, Field, generate_password, main_group_label
-from .. import theme
+from .. import icons, theme
 from ..dialogs.base import ask_text, ask_yes_no, button, label, show_info, show_warning
 from ..timers import Debounce
-from ..widgets.common import divider, fill_menu, icon_button, more_button, popup_below, scroll_area, section
+from ..widgets.common import GlyphView, add_action, divider, fill_menu, icon_button, more_button, popup_below, scroll_area, search_field, section, set_glyph
 from ..widgets.flow import flow_host
 from ..widgets.secret_edit import SecretEdit
 from .base import TabPage
@@ -65,6 +65,8 @@ ENTRY_KIND_ICONS = {"login": "🔑", "token": "🎟", "key": "🗝", "card": "�
 SEARCH_SETTLE_MS = 150  # the list is filtered once the typing pauses this long
 MASK = "••••••••"
 ROW_HEIGHT = 32  # px of a list row
+LEFT_ICON = 16  # px, the kind of an entry before its name
+RIGHT_ICON = 14  # px, the filled fields at the right edge
 RIGHT_ROLE = Qt.ItemDataRole.UserRole + 1
 ENTRY_ROLE = Qt.ItemDataRole.UserRole + 2
 
@@ -103,10 +105,10 @@ class EntryModel(QAbstractListModel):
     def right_text(self, e: Entry) -> str:
         if self.query.strip() and e.group != self.group:  # found in another list — say which
             return _("in “{group}”").format(group=e.group or main_group_label())
-        icons = field_summary(e.fields)[0].split()  # what is inside, not the kind it started as
-        if not icons:
+        glyphs = field_summary(e.fields)[0].split()  # what is inside, not the kind it started as
+        if not glyphs:
             return e.kind_label
-        return " ".join(icons[:MAX_ROW_ICONS]) + (f" +{len(icons) - MAX_ROW_ICONS}" if len(icons) > MAX_ROW_ICONS else "")
+        return " ".join(glyphs[:MAX_ROW_ICONS]) + (f" +{len(glyphs) - MAX_ROW_ICONS}" if len(glyphs) > MAX_ROW_ICONS else "")
 
     def data(self, index: QModelIndex | QPersistentModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
         if not index.isValid() or not 0 <= index.row() < len(self.rows):
@@ -124,6 +126,19 @@ class EntryModel(QAbstractListModel):
         return None
 
 
+def right_parts(text: str) -> list[str]:
+    """The right cell as icons and words: "🔑 👤 +2" → ["🔑", "👤", "+2"]; a text with no
+    glyph (the kind, the list a hit lives in) is one part."""
+    words = text.split()
+    if words and all(icons.name_of(w) or w.startswith("+") for w in words):
+        return words
+    return [text] if text else []
+
+
+def parts_width(fm: QFontMetrics, parts: list[str]) -> list[int]:
+    return [RIGHT_ICON if icons.name_of(p) else fm.horizontalAdvance(p) for p in parts]
+
+
 class EntryDelegate(QStyledItemDelegate):
     """A row: the icon and the name on the left, the right cell muted at the right edge."""
 
@@ -137,13 +152,26 @@ class EntryDelegate(QStyledItemDelegate):
         elif state & QStyle.StateFlag.State_MouseOver:
             painter.fillRect(r, QColor(t.HOVER))
         fm = option.fontMetrics
-        right = str(index.data(RIGHT_ROLE) or "")
-        right_w = min(fm.horizontalAdvance(right) + 12, r.width() // 2)
-        painter.setPen(QColor(t.MUTED))
-        painter.drawText(QRect(r.right() - right_w - 6, r.top(), right_w, r.height()), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight), fm.elidedText(right, Qt.TextElideMode.ElideRight, right_w))
+        parts = right_parts(str(index.data(RIGHT_ROLE) or ""))
+        right_w = min(sum(parts_width(fm, parts)) + 12, r.width() // 2)
+        x = r.right() - 6
+        for part, w in zip(reversed(parts), reversed(parts_width(fm, parts)), strict=True):
+            if x - w < r.right() - 6 - right_w:
+                break
+            if icons.name_of(part):
+                icons.paint(painter, part, QRect(x - w, r.top(), w, r.height()), t.MUTED, size=RIGHT_ICON)
+            else:
+                painter.setPen(QColor(t.MUTED))
+                painter.drawText(QRect(x - w - 12, r.top(), w + 12, r.height()), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight), fm.elidedText(part, Qt.TextElideMode.ElideRight, right_w))
+            x -= w + 4
+        glyph, name = icons.split(str(index.data() or ""))
+        left = r.left() + 8
+        if glyph is not None:
+            icons.paint(painter, glyph, QRect(left, r.top(), LEFT_ICON, r.height()), t.MUTED, size=LEFT_ICON)
+            left += LEFT_ICON + 8
         painter.setPen(QColor(t.TEXT))
-        name_rect = QRect(r.left() + 8, r.top(), r.width() - right_w - 20, r.height())
-        painter.drawText(name_rect, int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), fm.elidedText(str(index.data() or ""), Qt.TextElideMode.ElideRight, name_rect.width()))
+        name_rect = QRect(left, r.top(), r.right() - right_w - 12 - left, r.height())
+        painter.drawText(name_rect, int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), fm.elidedText(name, Qt.TextElideMode.ElideRight, name_rect.width()))
         painter.restore()
 
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex) -> QSize:
@@ -235,6 +263,7 @@ class FieldRow(QWidget):
                 self.value.setText(f.value)
             return
         self.value.set_shown(self.revealed)
+        set_glyph(self.eye, "🙈" if self.revealed else "👁")
         if self.revealed or self.value.hasFocus():
             if self.value.text() != f.value:
                 self.value.setText(f.value)
@@ -332,8 +361,7 @@ class GuardScreen(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         box = QVBoxLayout()
         box.setSpacing(4)
-        icon = label("🔒", "title", self)
-        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon = GlyphView("padlock", 44, self)
         self.title = label(_("Passwords are locked"), "title", self)
         self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.hint = label("", "subtitle", self)
@@ -346,7 +374,9 @@ class GuardScreen(QWidget):
         self.error.setAlignment(Qt.AlignmentFlag.AlignCenter)
         go = button(_("Unlock"), "primary", self)
         go.clicked.connect(self.submit)
-        for w in (icon, self.title, self.hint):
+        box.addWidget(icon, 0, Qt.AlignmentFlag.AlignHCenter)
+        box.addSpacing(6)
+        for w in (self.title, self.hint):
             box.addWidget(w)
         box.addSpacing(10)
         box.addWidget(self.code, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -439,7 +469,7 @@ class VaultPage(TabPage):
         col.addLayout(row)
 
         self.search = QLineEdit(left)
-        self.search.setPlaceholderText(hotkeys(_("🔍  Search  (Ctrl+F)")))
+        search_field(self.search, hotkeys(_("🔍  Search  (Ctrl+F)")))
         self.search.setClearButtonEnabled(True)
         self.search.setToolTip(hotkeys(_("Enter — the first hit onto the card, ↓ — into the list, Esc — clear.\nCtrl+Shift+C copies the password of the entry on the card, Ctrl+B its login.")))
         self.search.textChanged.connect(self._on_search_change)
@@ -470,7 +500,7 @@ class VaultPage(TabPage):
         self.new_btn = button(_("+ New entry") + "   ▾", "primary", host)
         new_menu = QMenu(self.new_btn)
         for kind, text in KINDS.items():
-            new_menu.addAction(f"{ENTRY_KIND_ICONS[kind]}  {_(text)}").triggered.connect(lambda _c=False, k=kind: self.new_entry(k))
+            add_action(new_menu, f"{ENTRY_KIND_ICONS[kind]}  {_(text)}").triggered.connect(lambda _c=False, k=kind: self.new_entry(k))
         self.new_btn.clicked.connect(lambda: popup_below(new_menu, self.new_btn))
         flow.addWidget(self.new_btn)
         tools = QWidget(host)
@@ -508,7 +538,7 @@ class VaultPage(TabPage):
         kl.addWidget(label(_("Kind"), "muted", kind))
         self.kind_box = QComboBox(kind)
         for k, v in KINDS.items():
-            self.kind_box.addItem(f"{ENTRY_KIND_ICONS[k]}  {_(v)}", k)
+            self.kind_box.addItem(icons.plain(ENTRY_KIND_ICONS[k]), _(v), k)
         self.kind_box.activated.connect(self._on_kind_change)
         kl.addWidget(self.kind_box)
         meta.addWidget(kind)
@@ -819,7 +849,7 @@ class VaultPage(TabPage):
             return
         menu = QMenu(self.add_field_btn)
         for text, key, secret in FIELD_PRESETS:
-            menu.addAction(_(text)).triggered.connect(lambda _c=False, k=key, s=secret: self.add_field(_(k), s))
+            add_action(menu, _(text)).triggered.connect(lambda _c=False, k=key, s=secret: self.add_field(_(k), s))
         menu.addSeparator()
         menu.addAction(_("Custom field…")).triggered.connect(lambda: self.add_field())
         popup_below(menu, self.add_field_btn)

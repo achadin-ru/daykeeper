@@ -20,7 +20,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -48,9 +48,9 @@ from ...session import COPY_PREFIX, sweep_preview_copies
 from ...settings import Links
 from ...tabs import moved, tab_order, tabs_hidden
 from ...vault import default_vault_path
-from .. import theme
+from .. import icons, theme
 from ..lock import strength_text
-from ..widgets.common import divider, icon_button, scroll_area
+from ..widgets.common import divider, icon_button, scroll_area, with_icon
 from ..widgets.secret_edit import SecretEdit
 from .base import ask_yes_no, button, label, paint_caption, register, show_error, show_info
 from ..errors import guard_events
@@ -187,8 +187,13 @@ class SettingsWindow(QDialog):
         nl.addSpacing(14)
         self.nav = QListWidget(nav)
         self.nav.setObjectName("SettingsNav")
+        self.nav.setIconSize(QSize(18, 18))
+        t = theme.current
         for name, text in sections():
-            item = QListWidgetItem(text, self.nav)
+            glyph, rest = icons.split(text)
+            item = QListWidgetItem(rest, self.nav)
+            if glyph is not None:
+                item.setIcon(icons.icon(glyph, lambda: t().MUTED, lambda: t().ACCENT_INK))
             item.setData(Qt.ItemDataRole.UserRole, name)
         self.nav.currentRowChanged.connect(self._nav_changed)
         nl.addWidget(self.nav, 1)
@@ -379,7 +384,8 @@ class SettingsWindow(QDialog):
                 row = QWidget(host)
                 rl = QHBoxLayout(row)
                 rl.setContentsMargins(0, 4, 0, 4)
-                on = QCheckBox(tab_label(tab), row)
+                on = QCheckBox(row)
+                with_icon(on, tab_label(tab))
                 on.setChecked(tab not in hidden)
                 on.toggled.connect(lambda v, t=tab: toggle(t, v))
                 rl.addWidget(on)

@@ -204,6 +204,88 @@ class JobsTest(unittest.TestCase):
         self.assertEqual(got, [])
 
 
+class IconsTest(unittest.TestCase):
+    """The vector icons that stand in for the emoji glyphs of the catalogue."""
+
+    def test_every_glyph_has_a_drawing_and_every_drawing_paints(self):
+        from PySide6.QtCore import QSize
+        from PySide6.QtGui import QIcon
+
+        from daykeeper.qt import icons
+
+        self.assertEqual({n for n in icons.GLYPHS.values() if n not in icons.DRAW}, set())
+        for name in icons.DRAW:
+            pm = icons.icon(name, lambda: "#000000").pixmap(QSize(16, 16), 1.5, QIcon.Mode.Normal, QIcon.State.Off)
+            self.assertEqual(pm.width(), 24, f"{name}: drawn at the device pixels of a 150 % screen")
+            image = pm.toImage()
+            inked = sum(1 for x in range(image.width()) for y in range(image.height()) if image.pixelColor(x, y).alpha() > 0)
+            self.assertGreater(inked, 8, f"{name} draws something")
+
+    def test_a_leading_glyph_is_split_off(self):
+        from daykeeper.qt import icons
+
+        self.assertEqual(icons.split("🔑  Password"), ("key", "Password"))
+        self.assertEqual(icons.split("  📎 With files"), ("clip", "With files"))
+        self.assertEqual(icons.split("Password"), (None, "Password"))
+        self.assertEqual(icons.split("🦄 Mine"), (None, "🦄 Mine"), "an unknown glyph stays text")
+
+    def test_the_fieldicons_glyphs_are_all_drawn(self):
+        from daykeeper import fieldicons
+        from daykeeper.qt import icons
+
+        for glyph in [*fieldicons.ICONS.values(), fieldicons.SECRET, fieldicons.PLAIN]:
+            self.assertIsNotNone(icons.name_of(glyph), glyph)
+
+
+class WakerTest(unittest.TestCase):
+    """A thread's answer wakes the GUI thread through a signal, with no timer asking."""
+
+    def test_calls_from_threads_run_on_the_gui_thread_once_per_batch(self):
+        runs: list[bool] = []
+        waker = jobs.Waker(lambda: runs.append(threading.current_thread() is threading.main_thread()))
+        threads = [threading.Thread(target=lambda: [waker() for _ in range(200)]) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertTrue(wait_until(lambda: runs, 2000))
+        pump(20)
+        self.assertTrue(all(runs))
+        self.assertLess(len(runs), 10, "800 calls before the GUI thread got to them are a few runs, not 800")
+        waker()
+        self.assertTrue(wait_until(lambda: len(runs) >= 2, 2000), "a call after a run wakes it again")
+        waker.close()
+
+    def test_a_job_pool_answer_arrives_without_a_timer(self):
+        from daykeeper.jobs import JobPool
+
+        got: list[int] = []
+        pool: JobPool
+
+        def take() -> None:
+            got.extend(r.value for r in pool.drain())
+
+        waker = jobs.Waker(take)
+        pool = JobPool(workers=1, notify=waker)
+        pool.submit("n", lambda: 7)
+        self.assertTrue(wait_until(lambda: got, 3000))
+        self.assertEqual(got, [7])
+        pool.close()
+        waker.close()
+
+    def test_nothing_runs_after_close_or_for_a_deleted_owner(self):
+        runs: list[int] = []
+        closed = jobs.Waker(lambda: runs.append(1))
+        closed.close()
+        closed()
+        owner = QObject()
+        orphan = jobs.Waker(lambda: runs.append(2), owner=owner)
+        shiboken6.delete(owner)
+        orphan()
+        pump(30)
+        self.assertEqual(runs, [])
+
+
 class SecretEditTest(unittest.TestCase):
     def test_nothing_typed_can_be_undone_back(self):
         """QLineEdit.clear() is undoable: once the field is shown (the eye), Ctrl+Z brings

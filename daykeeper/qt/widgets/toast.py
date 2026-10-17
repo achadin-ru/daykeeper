@@ -18,6 +18,7 @@ from PySide6.QtGui import QGuiApplication, QMouseEvent
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
 
 from ..errors import guard_events
+from .common import IconLabel
 
 TOAST_MS = 8_000
 WIDTH = 360  # px, as in the Tk window
@@ -45,7 +46,7 @@ class Toast(QWidget):
         body = QVBoxLayout(card)
         body.setContentsMargins(14, 10, 14, 10)
         body.setSpacing(2)
-        head = QLabel(title, card)
+        head = IconLabel(title, "", card, size=14)  # "⚡ name": the drawn icon, then the name
         head.setObjectName("ToastTitle")
         self.text = QLabel(text, card)
         self.text.setWordWrap(True)
