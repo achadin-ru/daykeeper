@@ -42,6 +42,7 @@ class Line:
     url: str = ""  # a link to open
     tab: str = ""  # a tab to show instead: "journal", "notes", "integrations", "vault"
     ok: bool | None = None  # True — went well (✓), False — went wrong (✗), None — neither
+    ref: str = ""  # what the line is about inside its tab: an entry id (vault), an MR key (reviews)
 
 
 @dataclass
@@ -121,7 +122,7 @@ def _reviews(vault, max_lines: int) -> Section | None:
         if facts.get("author"):
             text += f" — @{facts['author']}"
         url = str(facts.get("url") or "")
-        lines.append(Line(text, url=url, tab="" if url else TAB_INTEGRATIONS))
+        lines.append(Line(text, url=url, tab="" if url else TAB_INTEGRATIONS, ref=key))
     return _section(REVIEWS, lines, max_lines, TAB_INTEGRATIONS)
 
 
@@ -135,7 +136,7 @@ def _when_left(days_left: int) -> str:
 
 def _expiring(vault, today: str, days: int, seen: dict[str, str], max_lines: int) -> Section | None:
     found = expiry.expiring(vault, date.fromisoformat(today), days, seen)
-    lines = [Line(f"{x.entry_name} · {_(x.field)} — {_when_left(x.days_left)}", tab=TAB_VAULT, ok=False if x.days_left < 0 else None) for x in found]
+    lines = [Line(f"{x.entry_name} · {_(x.field)} — {_when_left(x.days_left)}", tab=TAB_VAULT, ok=False if x.days_left < 0 else None, ref=x.entry_id) for x in found]
     return _section(EXPIRING, lines, max_lines, TAB_VAULT)
 
 

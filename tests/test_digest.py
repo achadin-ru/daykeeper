@@ -104,6 +104,7 @@ class DigestTest(unittest.TestCase):
         self.assertEqual([x.text for x in s.lines], ["other!3 No link — @bob", "repo!7 Fix the sync — @alice"])
         self.assertEqual(s.lines[1].url, "https://gitlab.example.com/group/repo/-/merge_requests/7")
         self.assertEqual((s.lines[0].url, s.lines[0].tab), ("", "integrations"))
+        self.assertEqual([x.ref for x in s.lines], ["group/other!3", "group/repo!7"], "the MR each line is about")
 
     def test_keys_that_run_out_this_week(self):
         soon = Entry(name="GitLab PAT", fields=[Field("valid until", "2026-10-20")])
@@ -116,6 +117,7 @@ class DigestTest(unittest.TestCase):
         self.assertEqual([x.text for x in s.lines], ["Old key · expires — expired 2 d ago", "GitLab PAT · valid until — in 3 d"])
         self.assertEqual([x.ok for x in s.lines], [False, None])
         self.assertEqual({x.tab for x in s.lines}, {"vault"})
+        self.assertEqual([x.ref for x in s.lines], [gone.id, soon.id], "the entry an \"Open entry\" button targets")
         [s] = build(v, TODAY, now=NOW, expiry_days=1, seen={})
         self.assertEqual([x.text for x in s.lines], ["Old key · expires — expired 2 d ago", "Put off · expires — in 1 d"])
 
