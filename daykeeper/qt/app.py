@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import shiboken6
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, QSize, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLineEdit, QMainWindow, QPlainTextEdit, QStackedWidget, QToolButton, QVBoxLayout, QWidget
 
@@ -99,15 +99,19 @@ class MainScreen(QWidget):
         self.mark = label("", "", bar)
         row.addWidget(self.mark)
         row.addSpacing(8)
-        self.gear = icon_button("⚙", "", lambda: window.settings_dialog(), bar, role="rail")
+        self.gear = icon_button("", "", lambda: window.settings_dialog(), bar, role="rail")
         self.lock_btn = QToolButton(bar)
         self.lock_btn.setProperty("role", "rail")
         self.lock_btn.setIcon(icons.power())
         self.lock_btn.setAutoRaise(True)
         self.lock_btn.clicked.connect(window.lock)
-        self.lock_tab_btn = icon_button("🔒", "", lambda: window.security.lock_secrets(), bar, role="rail")
-        self.undo_btn = icon_button("↶", "", window.undo, bar, role="rail")
-        self.redo_btn = icon_button("↷", "", window.redo, bar, role="rail")
+        self.lock_tab_btn = icon_button("", "", lambda: window.security.lock_secrets(), bar, role="rail")
+        self.undo_btn = icon_button("", "", window.undo, bar, role="rail")
+        self.redo_btn = icon_button("", "", window.redo, bar, role="rail")
+        for w, picture in ((self.gear, icons.gear()), (self.lock_tab_btn, icons.padlock()), (self.undo_btn, icons.undo()), (self.redo_btn, icons.redo())):
+            w.setIcon(picture)
+            w.setIconSize(QSize(20, 20))
+        self.lock_btn.setIconSize(QSize(20, 20))
         for w in (self.gear, self.lock_btn, self.lock_tab_btn, self.undo_btn, self.redo_btn):
             row.addWidget(w)
         line = QFrame(bar)
@@ -258,6 +262,8 @@ class MainWindow(QMainWindow):
         self.gitlab: Any = None  # the GitLab check and the runs of routines, kept through a lock
         self.runs: Any = None
         self._install_shortcuts()
+        if MAC:
+            self._mac_menu()
         self._init_background()
         if self.background_jobs:  # a preview copy changes nothing outside its window
             from .dialogs.settings_claude import refresh_helper_in_background
@@ -313,6 +319,32 @@ class MainWindow(QMainWindow):
             action.triggered.connect(fn)
             self.addAction(action)
             self.actions_by_keys[keys] = action
+
+    def _mac_menu(self) -> None:
+        """macOS: the menu bar every app there has (decision 6 of the port): the app menu
+        with About and Settings (Qt moves them there by their role), File, Edit, Window."""
+        from PySide6.QtWidgets import QMenuBar
+
+        bar = QMenuBar()  # without a parent: the one menu bar of the app on macOS
+        app_menu = bar.addMenu("Daykeeper")
+        about = app_menu.addAction(_("About"))
+        about.setMenuRole(QAction.MenuRole.AboutRole)
+        about.triggered.connect(lambda: self.settings_dialog("general"))
+        prefs = app_menu.addAction(_("Settings"))
+        prefs.setMenuRole(QAction.MenuRole.PreferencesRole)
+        prefs.triggered.connect(lambda: self.settings_dialog("general"))
+        file_menu = bar.addMenu(_("File"))
+        file_menu.addAction(_("Lock the app")).triggered.connect(self.lock_key)
+        file_menu.addAction(_("Export to a readable file…")).triggered.connect(lambda: self.vault is not None and self.export_dialog())
+        quit_action = file_menu.addAction(_("Quit"))
+        quit_action.setMenuRole(QAction.MenuRole.QuitRole)
+        quit_action.triggered.connect(self.close)
+        edit_menu = bar.addMenu(_("Edit"))
+        edit_menu.addAction(_("Undo the last change")).triggered.connect(self.undo)
+        edit_menu.addAction(_("Redo what was undone")).triggered.connect(self.redo)
+        window_menu = bar.addMenu(_("Window"))
+        window_menu.addAction(_("Minimize")).triggered.connect(self.showMinimized)
+        self.mac_menu_bar = bar
 
     def lock_key(self) -> None:
         self.lock()

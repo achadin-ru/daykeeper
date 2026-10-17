@@ -40,7 +40,7 @@ def qt_app():
     app = QApplication.instance()
     if app is None:
         app = QApplication([])
-        app.setStyle("Fusion")
+        app.setStyle(theme.make_style())
     theme.apply(app, theme.LIGHT)
     return app
 

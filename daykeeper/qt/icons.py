@@ -16,15 +16,15 @@ Draw = Callable[[QPainter, QRectF], None]
 
 
 class _Engine(QIconEngine):
-    def __init__(self, draw: Draw, colour: Callable[[], str], active: Callable[[], str] | None = None):
+    def __init__(self, draw: Draw, colour: Callable[[], str], active: Callable[[], str] | None = None, disabled: Callable[[], str] | None = None):
         super().__init__()
-        self._draw, self._colour, self._active = draw, colour, active
+        self._draw, self._colour, self._active, self._disabled = draw, colour, active, disabled
 
     def paint(self, painter: QPainter, rect: QRect, mode: QIcon.Mode, state: QIcon.State) -> None:
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         if mode == QIcon.Mode.Disabled:
-            colour = QColor(theme.current().DISABLED_TEXT)
+            colour = QColor(self._disabled() if self._disabled is not None else theme.current().DISABLED_TEXT)
         elif mode == QIcon.Mode.Active and self._active is not None:  # under the pointer
             colour = QColor(self._active())
         else:
@@ -46,7 +46,7 @@ class _Engine(QIconEngine):
         return pm
 
     def clone(self) -> QIconEngine:
-        return _Engine(self._draw, self._colour, self._active)
+        return _Engine(self._draw, self._colour, self._active, self._disabled)
 
 
 def _eye(p: QPainter, r: QRectF) -> None:
@@ -73,8 +73,8 @@ def _power(p: QPainter, r: QRectF) -> None:
     p.drawLine(QPointF(box.center().x(), box.top() - side * 0.06), QPointF(box.center().x(), box.center().y()))
 
 
-def icon(draw: Draw, colour: Callable[[], str], active: Callable[[], str] | None = None) -> QIcon:
-    return QIcon(_Engine(draw, colour, active))
+def icon(draw: Draw, colour: Callable[[], str], active: Callable[[], str] | None = None, disabled: Callable[[], str] | None = None) -> QIcon:
+    return QIcon(_Engine(draw, colour, active, disabled))
 
 
 def eye(shown: bool = False) -> QIcon:
@@ -83,4 +83,71 @@ def eye(shown: bool = False) -> QIcon:
 
 
 def power() -> QIcon:
-    return icon(_power, lambda: theme.current().RAIL_TEXT, lambda: theme.current().ON_RAIL)
+    return _rail(_power)
+
+
+def _gear(p: QPainter, r: QRectF) -> None:
+    import math
+
+    c = r.center()
+    outer, inner = min(r.width(), r.height()) * 0.46, min(r.width(), r.height()) * 0.30
+    path = QPainterPath()
+    teeth = 8
+    for i in range(teeth * 2):
+        a0 = math.pi * 2 * i / (teeth * 2)
+        a1 = math.pi * 2 * (i + 1) / (teeth * 2)
+        rad = outer if i % 2 == 0 else inner * 1.18
+        pts = [QPointF(c.x() + rad * math.cos(a), c.y() + rad * math.sin(a)) for a in (a0, a1)]
+        if i == 0:
+            path.moveTo(pts[0])
+        else:
+            path.lineTo(pts[0])
+        path.lineTo(pts[1])
+    path.closeSubpath()
+    p.drawPath(path)
+    hole = inner * 0.55
+    p.drawEllipse(c, hole, hole)
+
+
+def _padlock(p: QPainter, r: QRectF) -> None:
+    w, h = r.width(), r.height()
+    body = QRectF(r.left() + w * 0.2, r.top() + h * 0.45, w * 0.6, h * 0.45)
+    p.drawRoundedRect(body, w * 0.08, w * 0.08)
+    arc = QRectF(r.left() + w * 0.32, r.top() + h * 0.12, w * 0.36, h * 0.6)
+    p.drawArc(arc, 0, 180 * 16)
+    p.drawLine(QPointF(arc.left(), arc.center().y()), QPointF(arc.left(), body.top()))
+    p.drawLine(QPointF(arc.right(), arc.center().y()), QPointF(arc.right(), body.top()))
+
+
+def _turn(p: QPainter, r: QRectF, back: bool) -> None:
+    """A curved arrow: back (undo) or forward (redo)."""
+    w, h = r.width(), r.height()
+    arc = QRectF(r.left() + w * 0.2, r.top() + h * 0.28, w * 0.6, h * 0.55)
+    start, span = (180 * 16, -200 * 16) if back else (0, 200 * 16)
+    p.drawArc(arc, start, span)
+    tip = QPointF(arc.left(), arc.center().y()) if back else QPointF(arc.right(), arc.center().y())
+    d = w * 0.16
+    side = 1 if back else -1
+    p.drawLine(tip, QPointF(tip.x() - side * d * 0.2, tip.y() - d))
+    p.drawLine(tip, QPointF(tip.x() + side * d, tip.y() - d * 0.2))
+
+
+def _rail(draw: Draw) -> QIcon:
+    """On the dark rail: grey, white under the pointer, nearly the rail itself when off."""
+    return icon(draw, lambda: theme.current().RAIL_TEXT, lambda: theme.current().ON_RAIL, lambda: theme.palette_mix(theme.current().RAIL_TEXT, theme.current().RAIL, 0.35))
+
+
+def gear() -> QIcon:
+    return _rail(_gear)
+
+
+def padlock() -> QIcon:
+    return _rail(_padlock)
+
+
+def undo() -> QIcon:
+    return _rail(lambda p, r: _turn(p, r, back=True))
+
+
+def redo() -> QIcon:
+    return _rail(lambda p, r: _turn(p, r, back=False))

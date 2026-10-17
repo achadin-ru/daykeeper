@@ -205,10 +205,6 @@ QScrollBar:horizontal {{ background: transparent; height: 10px; margin: 2px; }}
 QScrollBar::handle:horizontal {{ background: {t.SCROLL}; border-radius: 4px; min-width: 30px; }}
 QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::sub-page {{ background: none; border: none; width: 0; height: 0; }}
 QCheckBox, QRadioButton {{ color: {t.TEXT}; spacing: 8px; background: transparent; }}
-QCheckBox::indicator, QRadioButton::indicator {{ width: 16px; height: 16px; border: 1px solid {t.CHECK_BORDER}; background: {t.FIELD}; }}
-QCheckBox::indicator {{ border-radius: 4px; }}
-QRadioButton::indicator {{ border-radius: 8px; }}
-QCheckBox::indicator:checked, QRadioButton::indicator:checked {{ background: {t.ACCENT}; border: 1px solid {t.ACCENT}; }}
 QSpinBox {{ background: {t.FIELD}; color: {t.TEXT}; border: 1px solid {t.BORDER}; border-radius: 8px; padding: 4px 8px; }}
 QDialog#Settings, QStackedWidget#SettingsBody, QScrollArea#SettingsScroll, QWidget#SettingsScrollInner {{ background: {t.BG}; border: none; }}
 QFrame#Group {{ background: {t.CARD}; border: 1px solid {t.BORDER}; border-radius: 12px; }}
@@ -339,3 +335,64 @@ def translate_qt(app: QApplication, language: str) -> None:
     if translator.load("qtbase_ru", folder):
         app.installTranslator(translator)
         _translator = translator
+
+
+def make_style():
+    """Fusion with the check boxes and radio buttons drawn in the theme: an accent box with
+    an ink tick, a ring with a dot (the style sheet alone can only fill the box)."""
+    from PySide6.QtCore import QPointF, QRectF, Qt
+    from PySide6.QtGui import QPainterPath, QPen
+    from PySide6.QtWidgets import QProxyStyle, QStyle, QStyleFactory
+
+    class Style(QProxyStyle):
+        def pixelMetric(self, metric, option=None, widget=None):  # noqa: N802 — Qt's name
+            if metric in (QStyle.PixelMetric.PM_IndicatorWidth, QStyle.PixelMetric.PM_IndicatorHeight, QStyle.PixelMetric.PM_ExclusiveIndicatorWidth, QStyle.PixelMetric.PM_ExclusiveIndicatorHeight):
+                return 17
+            return super().pixelMetric(metric, option, widget)
+
+        def drawPrimitive(self, element, option, painter, widget=None):  # noqa: N802 — Qt's name
+            if element not in (QStyle.PrimitiveElement.PE_IndicatorCheckBox, QStyle.PrimitiveElement.PE_IndicatorRadioButton):
+                super().drawPrimitive(element, option, painter, widget)
+                return
+            t = current()
+            state = option.state
+            on = bool(state & QStyle.StateFlag.State_On)
+            enabled = bool(state & QStyle.StateFlag.State_Enabled)
+            hot = bool(state & QStyle.StateFlag.State_MouseOver)
+            r = QRectF(option.rect).adjusted(1.5, 1.5, -1.5, -1.5)
+            side = min(r.width(), r.height())
+            r = QRectF(r.center().x() - side / 2, r.center().y() - side / 2, side, side)
+            painter.save()
+            painter.setRenderHint(painter.RenderHint.Antialiasing)
+            fill = t.ACCENT if on else t.FIELD
+            if not enabled:
+                fill = t.ACCENT_DISABLED if on else t.HOVER
+            border = t.ACCENT if on or hot else t.CHECK_BORDER
+            painter.setPen(QPen(QColor(border), 1.2))
+            painter.setBrush(QColor(fill))
+            if element == QStyle.PrimitiveElement.PE_IndicatorRadioButton:
+                painter.drawEllipse(r)
+                if on:
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(QColor(t.ON_ACCENT))
+                    painter.drawEllipse(r.center(), side * 0.2, side * 0.2)
+            else:
+                painter.drawRoundedRect(r, side * 0.25, side * 0.25)
+                if on:
+                    pen = QPen(QColor(t.ON_ACCENT), max(1.6, side * 0.13))
+                    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+                    painter.setPen(pen)
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
+                    path = QPainterPath(QPointF(r.left() + side * 0.24, r.top() + side * 0.52))
+                    path.lineTo(QPointF(r.left() + side * 0.43, r.top() + side * 0.70))
+                    path.lineTo(QPointF(r.left() + side * 0.77, r.top() + side * 0.32))
+                    painter.drawPath(path)
+            painter.restore()
+
+    return Style(QStyleFactory.create("Fusion"))
+
+
+def palette_mix(a: str, b: str, t: float) -> str:
+    """`a` laid over `b` at strength `t` (palette.mix)."""
+    return palette.mix(a, b, t)

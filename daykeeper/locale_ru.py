@@ -867,4 +867,8 @@ RU: dict[str, str] = {
     # the Qt window: the buttons of its message boxes
     'Yes': 'Да',
     'No': 'Нет',
+    # the menu bar of the Qt window on macOS
+    'Quit': 'Выйти',
+    'Window': 'Окно',
+    'Minimize': 'Свернуть',
 }

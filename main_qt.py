@@ -26,9 +26,10 @@ def main() -> int:
 
     QCoreApplication.setLibraryPaths([str(Path(PySide6.__file__).resolve().parent / "plugins")])
     app = QApplication(sys.argv[:1])
-    app.setStyle("Fusion")  # the same base on Windows and macOS; our style sheet goes over it
 
     from daykeeper.qt import theme
+
+    app.setStyle(theme.make_style())  # Fusion on Windows and macOS alike, our check boxes; the style sheet goes over it
     from daykeeper.qt.app import MainWindow, install_excepthook
 
     argv = sys.argv[1:]
