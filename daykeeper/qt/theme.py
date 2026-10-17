@@ -147,6 +147,71 @@ QLabel#Status {{ color: {t.MUTED}; font-size: {small}pt; padding: 5px 16px; }}
 QFrame#Toast {{ background: {t.WHITE}; border: 1px solid {t.BORDER}; border-radius: 10px; }}
 QLabel#ToastTitle {{ color: {t.MUTED}; font-size: {small}pt; font-weight: bold; }}
 QToolTip {{ background: {t.CARD}; color: {t.TEXT}; border: 1px solid {t.BORDER}; padding: 4px 6px; }}
+QWidget#Page, QWidget#Guard {{ background: {t.BG}; }}
+QFrame#Sidebar {{ background: {t.SIDEBAR}; border: none; border-right: 1px solid {t.BORDER}; }}
+QFrame#Card, QScrollArea#CardScroll, QWidget#CardScrollInner {{ background: {t.CARD}; border: none; }}
+QSplitter::handle {{ background: {t.BORDER}; }}
+QFrame#Divider, QFrame#RailDivider {{ background: {t.BORDER}; border: none; }}
+QFrame#RailDivider {{ background: {t.RAIL_HOVER}; }}
+QLabel[role="section"] {{ color: {t.MUTED}; font-size: {small}pt; font-weight: bold; }}
+QLabel[role="placeholder"] {{ color: {t.MUTED}; font-size: {big}pt; }}
+QLabel[role="heading"] {{ font-size: {font_pt(15)}pt; font-weight: bold; }}
+QLineEdit[role="name"] {{ font-size: {font_pt(17)}pt; font-weight: bold; }}
+QLineEdit[role="key"] {{ color: {t.MUTED}; font-size: {muted}pt; }}
+QLineEdit:disabled, QPlainTextEdit:disabled {{ color: {t.DISABLED_TEXT}; }}
+QPlainTextEdit, QTextEdit, QTextBrowser {{
+    background: {t.FIELD}; color: {t.TEXT}; border: 1px solid {t.BORDER}; border-radius: 8px;
+    padding: 4px 6px; selection-background-color: {t.ACCENT_SOFT}; selection-color: {t.TEXT};
+}}
+QPlainTextEdit:focus, QTextEdit:focus {{ border: 1px solid {t.ACCENT}; }}
+QPlainTextEdit[role="console"] {{ background: {t.CONSOLE_BG}; color: {t.CONSOLE_TEXT}; border: none; font-family: "{palette.MONO}"; }}
+QPushButton[role="small"] {{ padding: 4px 10px; font-size: {font_pt(11)}pt; }}
+QToolButton {{ color: {t.TEXT}; background: transparent; border: none; border-radius: 6px; padding: 4px 6px; }}
+QToolButton:hover {{ background: {t.HOVER}; }}
+QToolButton:pressed, QToolButton:checked {{ background: {t.PRESSED}; }}
+QToolButton:disabled {{ color: {t.DISABLED_TEXT}; }}
+QToolButton[role="danger"] {{ color: {t.DANGER}; }}
+QToolButton[role="danger"]:hover {{ background: {t.DANGER_HOVER}; }}
+QToolButton[role="tab"] {{
+    color: {t.RAIL_TEXT}; background: transparent; border: none; border-radius: 8px;
+    padding: 6px 10px; font-size: {font_pt(11)}pt;
+}}
+QToolButton[role="tab"]:hover {{ background: {t.RAIL_HOVER}; color: {t.ON_RAIL}; }}
+QToolButton[role="tab"]:checked {{ background: {t.RAIL_ACTIVE}; color: {t.ON_ACCENT}; font-weight: bold; }}
+QComboBox {{
+    background: {t.FIELD}; color: {t.TEXT}; border: 1px solid {t.BORDER}; border-radius: 8px;
+    padding: 5px 10px;
+}}
+QComboBox:focus {{ border: 1px solid {t.ACCENT}; }}
+QComboBox::drop-down {{ border: none; width: 22px; }}
+QComboBox QAbstractItemView {{ background: {t.FIELD}; color: {t.TEXT}; border: 1px solid {t.BORDER}; selection-background-color: {t.ACCENT_SOFT}; selection-color: {t.TEXT}; outline: none; }}
+QListView, QTreeView, QListWidget {{
+    background: {t.SIDEBAR}; color: {t.TEXT}; border: none; outline: none;
+    selection-background-color: {t.ACCENT_SOFT}; selection-color: {t.TEXT};
+}}
+QFrame#Card QListView, QFrame#Card QListWidget {{ background: {t.CARD}; }}
+QListWidget::item, QTreeView::item {{ padding: 6px 8px; border-radius: 6px; }}
+QListWidget::item:hover, QTreeView::item:hover {{ background: {t.HOVER}; }}
+QListWidget::item:selected, QTreeView::item:selected {{ background: {t.ACCENT_SOFT}; color: {t.TEXT}; }}
+QMenu {{ background: {t.CARD}; color: {t.TEXT}; border: 1px solid {t.BORDER}; padding: 4px; }}
+QMenu::item {{ padding: 6px 22px 6px 14px; border-radius: 4px; }}
+QMenu::item:selected {{ background: {t.ACCENT_SOFT}; color: {t.TEXT}; }}
+QMenu::item:disabled {{ color: {t.DISABLED_TEXT}; }}
+QMenu::separator {{ height: 1px; background: {t.BORDER}; margin: 4px 6px; }}
+QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
+QScrollBar::handle:vertical {{ background: {t.SCROLL}; border-radius: 4px; min-height: 30px; }}
+QScrollBar::handle:vertical:hover {{ background: {t.SCROLL_HOVER}; }}
+QScrollBar:horizontal {{ background: transparent; height: 10px; margin: 2px; }}
+QScrollBar::handle:horizontal {{ background: {t.SCROLL}; border-radius: 4px; min-width: 30px; }}
+QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::sub-page {{ background: none; border: none; width: 0; height: 0; }}
+QCheckBox, QRadioButton {{ color: {t.TEXT}; spacing: 8px; background: transparent; }}
+QCheckBox::indicator, QRadioButton::indicator {{ width: 16px; height: 16px; border: 1px solid {t.CHECK_BORDER}; background: {t.FIELD}; }}
+QCheckBox::indicator {{ border-radius: 4px; }}
+QRadioButton::indicator {{ border-radius: 8px; }}
+QCheckBox::indicator:checked, QRadioButton::indicator:checked {{ background: {t.ACCENT}; border: 1px solid {t.ACCENT}; }}
+QSpinBox {{ background: {t.FIELD}; color: {t.TEXT}; border: 1px solid {t.BORDER}; border-radius: 8px; padding: 4px 8px; }}
+QProgressBar {{ background: {t.HOVER}; border: none; border-radius: 3px; max-height: 6px; text-align: center; }}
+QProgressBar::chunk {{ background: {t.SUCCESS}; border-radius: 3px; }}
 """
 
 
@@ -231,3 +296,16 @@ def logo(size: int, ratio: float = 1.0) -> QPixmap | None:
         return None
     pixmap.setDevicePixelRatio(best / size)
     return pixmap
+
+
+def font(tk_size: float, bold: bool = False, mono: bool = False) -> QFont:
+    """A font of the old layout's size (`tk_size` in Tk points, see TK_TO_QT)."""
+    f = QFont(palette.MONO) if mono else body_font()
+    f.setPointSize(font_pt(tk_size))
+    f.setBold(bold)
+    return f
+
+
+def blend(a: str, b: str, t: float) -> str:
+    """Colour `a` mixed into `b` by `t` (0 — all b, 1 — all a)."""
+    return palette.mix(a, b, t)

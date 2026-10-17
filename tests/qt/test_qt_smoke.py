@@ -67,7 +67,7 @@ class QtSmokeTest(unittest.TestCase):
         self.assertTrue(wait_until(lambda: win.vault is not None), screen.error.text())
         self.assertIs(win.screens.currentWidget(), win.main_screen)
         self.assertTrue(self.path.exists(), "the vault was created on disk")
-        self.assertEqual(win.main_screen.pages.count(), 0, "the main screen is empty in stage 1")
+        self.assertIn("vault", win.pages, "the Passwords tab is made at unlock")
         self.assertEqual((screen.pw1.text(), screen.pw2.text()), ("", ""), "nothing typed stays behind")
 
         QTest.keyClick(win, Qt.Key.Key_L, Qt.KeyboardModifier.ControlModifier)

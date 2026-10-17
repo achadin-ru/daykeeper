@@ -88,3 +88,53 @@ def activate(window) -> None:
     window.show()
     window.activateWindow()
     QTest.qWaitForWindowActive(window, 1000)
+
+
+class FakeClipboard:
+    """Stands in for the system clipboard: a test must never write to the real one."""
+
+    def __init__(self):
+        self.text: str | None = None
+
+    def put(self, text: str) -> bool:
+        self.text = text
+        return True
+
+    def get(self) -> str | None:
+        return self.text
+
+    def clear(self) -> None:
+        self.text = None
+
+
+def open_window(folder, password: str = "test-master-1", unlock: bool = True, language: str = "en", errors: list | None = None):
+    """A MainWindow on a vault in `folder` (a temp dir), shown offscreen and active, with a
+    fake clipboard and errors collected in `errors`; unlocked (and created) by default."""
+    from pathlib import Path
+
+    from daykeeper.clipboard import SecretClipboard
+    from daykeeper.qt.app import MainWindow
+    from daykeeper.settings import write_settings
+
+    path = Path(folder) / "test.pkv"
+    write_settings(path.parent / "settings.json", {"language": language, "geometry": "1200x760+20+20"})
+    win = MainWindow(path, preview=True)
+    clip = FakeClipboard()
+    win.fake_clip = clip
+    win._clip = SecretClipboard(clip.put, clip.get, clip.clear, put=clip.put, clear_if=lambda e: (clip.clear() or True) if clip.text == e else False, read=clip.get)
+    win._qt_clip_put = clip.put
+    win._qt_clip_get = clip.get
+    win._qt_clip_clear = clip.clear
+    sink = errors if errors is not None else []
+    win.report_error = lambda t, e, tb: sink.append(repr(e))
+    activate(win)
+    if unlock:
+        win.unlock(password)
+        pump()
+    return win
+
+
+def close_window(win) -> None:
+    win.close()
+    win.deleteLater()
+    pump()
