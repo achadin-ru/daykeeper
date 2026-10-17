@@ -3,7 +3,7 @@
 
 [tool.ruff]
 target-version = "py313"
-extend-exclude = ["build", "dist", ".venv"]
+extend-exclude = ["build", "dist", ".venv", ".venv-qt"]
 
 [tool.ruff.lint]
 # pyflakes, pycodestyle, bugbear, bandit (security), pyupgrade, simplify
@@ -60,6 +60,9 @@ files = [
     "daykeeper/layout.py",
     "daykeeper/tabs.py",
     "daykeeper/fieldicons.py",
+    # the Qt window: PySide6 ships its type stubs (without it installed they are Any)
+    "daykeeper/qt",
+    "main_qt.py",
 ]
 ignore_missing_imports = true
 warn_unused_ignores = true
