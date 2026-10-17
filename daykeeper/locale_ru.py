@@ -864,4 +864,17 @@ RU: dict[str, str] = {
     'Dark': 'Тёмное',
     'Restart now': 'Перезапустить',
     'Takes effect after a restart: the app asks for the master password again.': 'Применится после перезапуска: приложение снова спросит мастер-пароль.',
+    # importers.py
+    'Unknown export format': 'Неизвестный формат выгрузки',
+    'The file is not UTF-8 text': 'Файл — не текст в UTF-8',
+    'The file declares a DOCTYPE: refused for safety': 'В файле есть объявление DOCTYPE: отказ ради безопасности',
+    'Not a KeePass XML export': 'Это не XML-выгрузка KeePass',
+    'Not a Bitwarden export': 'Это не выгрузка Bitwarden',
+    'The export is encrypted: export the vault again as plain .json': 'Выгрузка зашифрована: выгрузите хранилище заново как обычный .json',
+    'Damaged CSV file': 'Повреждённый CSV-файл',
+    'Damaged XML file': 'Повреждённый XML-файл',
+    'Damaged JSON file': 'Повреждённый JSON-файл',
+    'The file is larger than {n} MB': 'Файл больше {n} МБ',
+    'lists: +{n}': 'списков: +{n}',
+    'skipped {n}': 'пропущено {n}',
 }
