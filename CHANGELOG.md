@@ -1,5 +1,21 @@
 # Changes
 
+## Unreleased — the Qt window, next to the Tk one
+
+Not part of a release yet: built as a separate artifact for comparison.
+
+- A second window of the app on Qt (PySide6 6.12, Qt Widgets), with every tab, the
+  settings, the locks and the guard of the Passwords tab of the Tk window: `main_qt.py`,
+  `build_qt.bat`, the `Daykeeper-qt-*` artifacts of the build workflow. Same vault, same
+  settings file, same journal inbox.
+- The theme switches at once, without a restart. The tabs build in tens of milliseconds
+  (10 000 password entries open in about 0.15 s; a busy day of notes in 0.07 s).
+- A secret value of a password entry is put into its field only while it is shown or
+  typed into.
+- The folder build is about 71 MB (the Tk folder build is smaller); Windows 10 1809+ or
+  macOS 14+. Qt is used under the LGPL: THIRD_PARTY.md and `licenses/`.
+- The console helper and the Tk builds leave Qt out (`--exclude-module PySide6`).
+
 ## 1.1.2-beta.2 — pre-release: the fixes of the audit of 16 October 2026 and the Notes tab speed-up
 
 > **Pre-release, still in development.** Covered by the automated tests and a scripted

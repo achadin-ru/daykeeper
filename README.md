@@ -89,6 +89,21 @@ the previous name, PassKeeper, is renamed on the first start.
 Shortcuts are Ctrl+letter on Windows and Cmd+letter on macOS; tooltips show the one for
 your system. `Ctrl+1…6` and `Ctrl+Tab` switch the tabs.
 
+## The Qt window (preview)
+
+A second window of the same app is being built on Qt (PySide6), next to the Tk one, to be
+compared before it replaces it: `main_qt.py` from source, `build_qt.bat` for a folder build
+(`dist\Daykeeper-qt\`), or the `Daykeeper-qt-*` artifacts of the build workflow. It reads
+and writes the same vault, `settings.json` and journal inbox. It is not part of a release
+yet. Start it on a copy of your vault while you try it:
+
+```
+.venv\Scripts\python main_qt.py C:\path\to\a-copy\vault.pkv
+```
+
+The Qt build needs Windows 10 1809 or later, or macOS 14 or later. It uses Qt under the
+LGPL — see [THIRD_PARTY.md](THIRD_PARTY.md). The theme switches at once, without a restart.
+
 ## Passwords
 
 - Entry kinds: login and password, API token, SSH key / certificate, bank card, note,
@@ -409,7 +424,10 @@ first visit.
 The models, the session, the timers, the jobs and the runner are tested without a
 window; `tests/test_app_smoke.py`, `tests/test_audit_fixes.py` and `tests/test_audit_1016.py` open the whole window
 on a temporary vault (every tab, the locks, a conflict, the dark theme in a separate
-process) and are skipped where there is no display.
+process) and are skipped where there is no display. The tests of the Qt window
+(`tests/qt/`, `tests/test_qt_package.py`) need PySide6 (`requirements-build.txt`) and run
+without a screen; without PySide6 they are skipped. `tests/bench_qt_tabs.py` and
+`tests/bench_qt_shell.py` print the speed of the Qt window against its targets.
 
 Lint and types — `ruff` over everything, `mypy` over the pure modules (`pyproject.toml`);
 CI runs both before the tests:

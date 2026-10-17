@@ -4,13 +4,14 @@ tests/bench_qt_tabs.py (which prints the numbers against the targets of the port
 section 4). Every number includes the layout and the painting (repaint)."""
 from __future__ import annotations
 
+import os
 import statistics
 import tempfile
 import time
 
 from tests.qt_helpers import close_window, open_window
 
-SLACK = 3  # the unit tests fail only past three times the target
+SLACK = 10 if os.environ.get("CI") else 3  # the unit tests fail only past this many times the target (a CI runner is slow and shared)
 
 # the targets of the port plan (section 4), in seconds
 TARGETS = {

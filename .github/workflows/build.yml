@@ -52,17 +52,33 @@ jobs:
         # The console helper first (the Claude Code hook and the journal commands, a folder:
         # it starts three times faster than one file), then the app that carries it.
         run: |
-          python -m PyInstaller --noconfirm --clean --onedir --console --noupx --name daykeeper-cli --icon assets/icon.ico --exclude-module tkinter --exclude-module cryptography --exclude-module argon2 cli_main.py
+          python -m PyInstaller --noconfirm --clean --onedir --console --noupx --name daykeeper-cli --icon assets/icon.ico --exclude-module tkinter --exclude-module cryptography --exclude-module argon2 --exclude-module PySide6 --exclude-module shiboken6 cli_main.py
           if ($LASTEXITCODE) { exit 1 }
           Set-Content -NoNewline -Encoding ascii dist/daykeeper-cli/build-id.txt "${{ github.sha }}"
-          python -m PyInstaller --noconfirm --clean --onefile --noconsole --noupx --name Daykeeper --icon assets/icon.ico --add-data "assets;assets" --add-data "dist/daykeeper-cli;daykeeper-cli" main.py
+          python -m PyInstaller --noconfirm --clean --onefile --noconsole --noupx --name Daykeeper --icon assets/icon.ico --add-data "assets;assets" --add-data "dist/daykeeper-cli;daykeeper-cli" --exclude-module PySide6 --exclude-module shiboken6 main.py
           if ($LASTEXITCODE) { exit 1 }
           # the same app as a folder: it opens its window in well under a second, where the
           # one-file exe unpacks itself on every start (about two seconds, more with antivirus)
-          python -m PyInstaller --noconfirm --clean --onedir --noconsole --noupx --name Daykeeper --icon assets/icon.ico --add-data "assets;assets" --add-data "dist/daykeeper-cli;daykeeper-cli" --distpath dist/Daykeeper-win64 --workpath build/Daykeeper-win64 main.py
+          python -m PyInstaller --noconfirm --clean --onedir --noconsole --noupx --name Daykeeper --icon assets/icon.ico --add-data "assets;assets" --add-data "dist/daykeeper-cli;daykeeper-cli" --exclude-module PySide6 --exclude-module shiboken6 --distpath dist/Daykeeper-win64 --workpath build/Daykeeper-win64 main.py
           if ($LASTEXITCODE) { exit 1 }
           python -c "import shutil; shutil.make_archive('dist/Daykeeper-win64', 'zip', 'dist/Daykeeper-win64')"
           if ($LASTEXITCODE) { exit 1 }
+
+      - name: Build the Qt window
+        # next to the Tk build until the two are compared (the port plan): a separate
+        # artifact, not part of a release; the folder must stay under 75 MB
+        run: |
+          python -m PyInstaller --noconfirm --clean --distpath dist --workpath build/Daykeeper-qt packaging/daykeeper-qt.spec
+          if ($LASTEXITCODE) { exit 1 }
+          python packaging/check_size.py dist/Daykeeper-qt 75
+          if ($LASTEXITCODE) { exit 1 }
+          python -c "import shutil; shutil.make_archive('dist/Daykeeper-qt-win64', 'zip', 'dist/Daykeeper-qt')"
+          if ($LASTEXITCODE) { exit 1 }
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Daykeeper-qt-windows
+          path: dist/Daykeeper-qt-win64.zip
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -99,7 +115,7 @@ jobs:
         run: |
           python -m PyInstaller --noconfirm --clean --windowed --noupx --name Daykeeper \
             --icon assets/icon.icns --add-data "assets:assets" \
-            --osx-bundle-identifier ru.achadin.daykeeper main.py
+            --osx-bundle-identifier ru.achadin.daykeeper --exclude-module PySide6 --exclude-module shiboken6 main.py
           VERSION=$(python -c "import daykeeper; print(daykeeper.__version__)")
           PLIST=dist/Daykeeper.app/Contents/Info.plist
           plutil -replace CFBundleShortVersionString -string "${VERSION%%-*}" "$PLIST"  # macOS takes digits and dots only: 1.1.2-beta.1 -> 1.1.2
@@ -107,6 +123,19 @@ jobs:
           plutil -replace LSMinimumSystemVersion -string "14.0" "$PLIST"
           codesign --force --deep --sign - dist/Daykeeper.app
           ditto -c -k --sequesterRsrc --keepParent dist/Daykeeper.app dist/Daykeeper-macos.zip
+
+      - name: Build the Qt window
+        # a separate artifact next to the Tk bundle, not part of a release (the port plan)
+        run: |
+          python -m PyInstaller --noconfirm --clean --distpath dist --workpath build/Daykeeper-qt packaging/daykeeper-qt.spec
+          python packaging/check_size.py "dist/Daykeeper Qt.app" 110
+          codesign --force --deep --sign - "dist/Daykeeper Qt.app"
+          ditto -c -k --sequesterRsrc --keepParent "dist/Daykeeper Qt.app" dist/Daykeeper-qt-macos.zip
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Daykeeper-qt-macos
+          path: dist/Daykeeper-qt-macos.zip
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

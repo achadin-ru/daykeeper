@@ -63,7 +63,11 @@ jobs:
           python-version: "3.13"
 
       - name: Install
-        run: python -m pip install -r requirements-dev.txt
+        # the pinned build set first: it brings PySide6, so the tests of the Qt window run
+        # here too (without a screen, the offscreen platform)
+        run: |
+          python -m pip install --require-hashes -r requirements-build.txt
+          python -m pip install -r requirements-dev.txt
 
       - name: Tests
         timeout-minutes: 15

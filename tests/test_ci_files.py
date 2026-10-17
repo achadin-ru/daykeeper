@@ -74,6 +74,32 @@ class CiFilesTest(unittest.TestCase):
         for text in (workflow, _read("build.sh")):
             self.assertIn('CFBundleShortVersionString -string "${VERSION%%-*}"', text)
 
+    def test_the_qt_build_stands_next_to_the_tk_one(self):
+        """The port plan: the Qt window is built from its own spec as a separate artifact, kept
+        under its size ceiling and out of the release; the helper and the Tk builds leave Qt out."""
+        workflow = _read(".github/workflows/build.yml")
+        self.assertEqual(workflow.count("packaging/daykeeper-qt.spec"), 2, "Windows and macOS")
+        self.assertIn("packaging/check_size.py dist/Daykeeper-qt 75", workflow)
+        self.assertIn("Daykeeper-qt-win64.zip", workflow)
+        release = workflow[workflow.index("  release:"):]
+        self.assertNotIn("Daykeeper-qt", release, "not part of a release until the switch")
+        for text in (workflow, _read("build.bat")):
+            for line in (x for x in text.splitlines() if "PyInstaller" in x and ("cli_main.py" in x or " main.py" in x)):
+                self.assertIn("--exclude-module PySide6", line, line)
+        self.assertIn(r"packaging\daykeeper-qt.spec", _read("build_qt.bat"))
+        spec = _read("packaging/daykeeper-qt.spec")
+        self.assertIn("licenses", spec)
+        self.assertIn("THIRD_PARTY.md", spec)
+        for name in ("LGPL-3.0.txt", "GPL-3.0.txt"):
+            self.assertTrue((ROOT / "licenses" / name).stat().st_size > 5000, name)
+
+    def test_the_qt_tests_run_in_ci(self):
+        """The Windows test job installs the pinned build set, which brings PySide6."""
+        text = _read(".github/workflows/test.yml")
+        windows = text[text.index("  tests-windows:"):]
+        self.assertIn("--require-hashes -r requirements-build.txt", windows)
+        self.assertIn("PySide6-Essentials==", _read("requirements-build.txt"))
+
     def test_dev_tools_are_pinned(self):
         text = _read("requirements-dev.txt")
         self.assertRegex(text, r"(?m)^pip-audit==\d", msg="pip-audit pinned")
