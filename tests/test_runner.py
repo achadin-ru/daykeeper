@@ -60,3 +60,32 @@ class RunTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(sys.platform == "win32", "cmd.exe")
+class ConsoleCommandTest(unittest.TestCase):
+    """The console line keeps quoted paths and arguments whole (they arrived cut in pieces
+    when the line went to cmd through list2cmdline)."""
+
+    def run_line(self, plan) -> list[str]:
+        import ast
+        import subprocess
+
+        from daykeeper.runner import console_command
+
+        line = console_command(plan).replace(" /K ", " /C ", 1)  # the same parsing, no window left open
+        out = subprocess.run(line, capture_output=True, text=True, creationflags=0x08000000, timeout=30)  # noqa: S603
+        return ast.literal_eval(out.stdout.strip())
+
+    def test_argv_with_spaces_quotes_and_cmd_characters(self):
+        from types import SimpleNamespace
+
+        args = ["a b", 'say "hi"', "x&y", "(paren)", "plain"]
+        plan = SimpleNamespace(argv=[sys.executable, "-c", "import sys; print(sys.argv[1:])", *args], shell="")
+        self.assertEqual(self.run_line(plan), args)
+
+    def test_a_shell_line_with_quotes_reaches_the_program_as_written(self):
+        from types import SimpleNamespace
+
+        line = f'"{sys.executable}" -c "import sys; print(sys.argv[1:])" "a b" c'
+        self.assertEqual(self.run_line(SimpleNamespace(argv=[], shell=line)), ["a b", "c"])
