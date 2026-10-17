@@ -18,6 +18,13 @@ if sys.platform == "win32" and "QT_QPA_FONTDIR" not in os.environ:
     # as boxes and every width measured from it was wrong
     os.environ["QT_QPA_FONTDIR"] = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
 
+from daykeeper import win32  # noqa: E402
+
+# the same sizes on every machine, whatever its Windows text size (read when the Qt theme
+# is imported, so before any test imports it)
+REAL_TEXT_SCALE = win32.text_scale
+win32.text_scale = lambda: 1.0
+
 try:
     import PySide6  # noqa: F401
 except ImportError:
@@ -41,6 +48,7 @@ def qt_app():
     if app is None:
         app = QApplication([])
         app.setStyle(theme.make_style())
+    theme.TEXT_SCALE = 1.0  # see win32.text_scale above; a test that changed it is undone
     theme.apply(app, theme.LIGHT)
     return app
 

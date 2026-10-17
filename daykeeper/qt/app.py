@@ -48,7 +48,7 @@ INBOX_SETTLE_MS = 700  # the inbox is read this long after its last change: a wr
 ERROR_DIALOG_EVERY = 30  # s; an error in a timer repeats, its dialog must not
 MIN_WIDTH, MIN_HEIGHT = 860, 540  # px; the bar of icon-only tabs fits in the width
 BAR_LOGO = 30  # px
-TAB_ICON = 18  # px, the drawn icon of a tab button
+TAB_ICON = theme.px(18)  # px, the drawn icon of a tab button
 TAB_TIPS = {  # what each tab is for, on hover over its button (the same keys as app.TAB_TIPS)
     "vault": "Logins, tokens and other secrets, encrypted with the master password",
     "bookmarks": "Work sites as tiles; a tile can copy the password of its entry",

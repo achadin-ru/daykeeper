@@ -10,7 +10,7 @@ from .. import icons, theme
 
 COUNT_ROLE = Qt.ItemDataRole.UserRole + 1
 KEY_ROLE = Qt.ItemDataRole.UserRole + 2
-ROW_ICON = 15  # px, the drawn icon of a row whose text starts with a glyph
+ROW_ICON = theme.px(15)  # px, the drawn icon of a row whose text starts with a glyph
 
 
 class CountDelegate(QStyledItemDelegate):
@@ -44,7 +44,7 @@ class CountDelegate(QStyledItemDelegate):
         painter.restore()
 
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex) -> QSize:
-        return QSize(120, 32)
+        return QSize(120, theme.px(32))
 
 
 def count_list(parent: QWidget) -> QListWidget:

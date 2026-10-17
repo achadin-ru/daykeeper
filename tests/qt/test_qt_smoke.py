@@ -13,6 +13,7 @@ from tests.qt_helpers import activate, pump, qt_app, require_qt, type_text, wait
 
 require_qt()
 
+import shiboken6  # noqa: E402
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 
@@ -145,7 +146,7 @@ class QtSmokeTest(unittest.TestCase):
         pump()
         win.lock()
         pump()
-        self.assertFalse(dlg.isVisible())
+        self.assertFalse(shiboken6.isValid(dlg), "a closed dialog is deleted, with whatever it showed")
         self.assertNotIn(toast, Toast.stack)
 
     def test_language_switch_and_the_window_place(self) -> None:

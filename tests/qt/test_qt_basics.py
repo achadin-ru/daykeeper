@@ -204,6 +204,46 @@ class JobsTest(unittest.TestCase):
         self.assertEqual(got, [])
 
 
+class TextScaleTest(unittest.TestCase):
+    """Windows' "Text size" makes every font of the window bigger (Qt does not do it)."""
+
+    def tearDown(self):
+        theme.TEXT_SCALE = 1.0
+        theme.apply(qt_app(), theme.LIGHT)
+
+    def test_fonts_follow_the_text_size(self):
+        base = theme.font_pt(11), theme.font(12).pointSizeF()
+        theme.TEXT_SCALE = 1.25
+        self.assertEqual(theme.font_pt(11), 12.5)
+        self.assertEqual(theme.font(12).pointSizeF(), 14.0)  # 11 pt × 1.25, to half a point
+        self.assertIn("font-size: 12.5pt", theme.build_qss(theme.LIGHT))
+        self.assertEqual(base, (10, 11.0))
+
+    def test_the_setting_is_read_within_bounds(self):
+        from unittest import mock
+
+        from daykeeper import win32
+        from tests.qt_helpers import REAL_TEXT_SCALE as text_scale
+
+        if not win32.IS_WINDOWS:
+            self.assertEqual(text_scale(), 1.0)
+            return
+        import winreg
+
+        class Key:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        for raw, want in ((125, 1.25), (300, 2.25), (50, 1.0)):
+            with mock.patch.object(winreg, "OpenKey", return_value=Key()), mock.patch.object(winreg, "QueryValueEx", return_value=(raw, 4)):
+                self.assertEqual(text_scale(), want)
+        with mock.patch.object(winreg, "OpenKey", side_effect=OSError):
+            self.assertEqual(text_scale(), 1.0)
+
+
 class IconsTest(unittest.TestCase):
     """The vector icons that stand in for the emoji glyphs of the catalogue."""
 

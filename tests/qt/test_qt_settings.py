@@ -15,6 +15,7 @@ from tests.qt_helpers import close_window, open_window, pump, qt_app, require_qt
 
 require_qt()
 
+import shiboken6  # noqa: E402
 from PySide6.QtGui import QPalette  # noqa: E402
 from PySide6.QtWidgets import QApplication, QCheckBox  # noqa: E402
 
@@ -148,7 +149,25 @@ class SettingsTest(unittest.TestCase):
         dlg = self.open("general")
         self.win.lock()
         pump()
-        self.assertFalse(dlg.isVisible())
+        self.assertFalse(shiboken6.isValid(dlg), "closed and deleted")
+
+    def test_closed_windows_do_not_pile_up(self):
+        """Every dialog and settings window is deleted once closed: none is left hidden
+        holding what it showed (and slowing every later restyle)."""
+        from PySide6.QtWidgets import QDialog
+
+        before = len(QApplication.allWidgets())
+        for _ in range(3):
+            self.open("general").close()
+            pump()
+            self.win.show_page("bookmarks")
+            dlg = self.win.page("bookmarks").bookmark_dialog(None)
+            pump()
+            dlg.close()
+            pump()
+        hidden = [w for w in QApplication.topLevelWidgets() if isinstance(w, QDialog) and not w.isVisible()]
+        self.assertEqual(hidden, [])
+        self.assertLess(len(QApplication.allWidgets()) - before, 150, "the Bookmarks tab is new, nothing more")
 
 
 class DataDialogsTest(unittest.TestCase):

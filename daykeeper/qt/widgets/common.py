@@ -17,7 +17,7 @@ from PySide6.QtWidgets import QAbstractButton, QAbstractSpinBox, QApplication, Q
 from .. import icons, theme
 from ..errors import guard_events
 
-ICON_PX = 16  # a drawn icon on a button, in a menu, beside a text
+ICON_PX = theme.px(16)  # a drawn icon on a button, in a menu, beside a text
 
 MenuItems = Iterable[tuple[str, Callable[[], object]] | None]  # None — a separator
 
@@ -105,6 +105,13 @@ def more_button(items: MenuItems, tip: str = "", parent: QWidget | None = None) 
     menu = fill_menu(QMenu(b), items)
     b.clicked.connect(lambda: popup_below(menu, b))
     return b
+
+
+def transient(menu: QMenu) -> QMenu:
+    """A menu made for one right click: deleted once it closes (else every click would
+    leave one more hidden menu behind)."""
+    menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+    return menu
 
 
 def popup_below(menu: QMenu, widget: QWidget) -> QAction | None:

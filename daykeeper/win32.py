@@ -141,6 +141,22 @@ def oem_codepage() -> str | None:
         return None
 
 
+def text_scale() -> float:
+    """Windows' "Text size" (Settings → Accessibility), 1.0 to 2.25; 1.0 elsewhere or when
+    it is not set. Programs get it only by reading it: a font of a given size is not made
+    bigger by the system."""
+    if not IS_WINDOWS:
+        return 1.0
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Accessibility") as key:
+            value = int(winreg.QueryValueEx(key, "TextScaleFactor")[0])
+    except (OSError, ValueError, TypeError):
+        return 1.0
+    return min(2.25, max(1.0, value / 100))
+
+
 def ui_language_is_russian() -> bool | None:
     """Whether the Windows UI language is Russian; None elsewhere or when unknown."""
     if not IS_WINDOWS:

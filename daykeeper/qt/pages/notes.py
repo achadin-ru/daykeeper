@@ -29,7 +29,7 @@ from ...notes import MAX_SIZE, NOTE_COLORS, Attachment, Note, NoteItem
 from .. import icons, theme
 from ..dialogs.base import ask_yes_no, button, label, show_warning
 from ..timers import IdleOnce
-from ..widgets.common import scroll_area, search_field, section
+from ..widgets.common import scroll_area, search_field, section, transient
 from ..widgets.countlist import COUNT_ROLE, KEY_ROLE, add_count_item, count_list
 from .base import TabPage
 from ..errors import guard_events
@@ -44,9 +44,9 @@ PAD_Y = 10
 CHECK = 18
 TEXT_X = 26
 RM_W = 18
-PIN_ICON = 18  # px, the pin of a note
-FOOT_ICON = 17  # px, ⋯, the palette and the clip under a note
-FILE_ICON = 16  # px, before the name of an attached file
+PIN_ICON = theme.px(18)  # px, the pin of a note
+FOOT_ICON = theme.px(17)  # px, ⋯, the palette and the clip under a note
+FILE_ICON = theme.px(16)  # px, before the name of an attached file
 ROW_PAD = 3
 PREVIEW_LINES = 8
 PREVIEW_CHARS = 1200
@@ -1020,10 +1020,17 @@ class NotesPage(TabPage):
         self.area.verticalScrollBar().setValue(top if keep_scroll else 0)
 
     def avail_width(self) -> int:
-        w = self.flow.width()
-        if w <= 1:
-            w = max(CARD_MIN_WIDTH, self.area.viewport().width() - 48)
-        return w
+        """The width the cards are laid out in: always as if the scroll bar were there.
+        Taken with and without it, the bar's own 10 px could flip two columns into one
+        and back — taller cards bring the bar, the bar narrows the row, one column is
+        taller still… — and the layout never settled (a stack overflow at 150 % text)."""
+        area = self.area
+        content = area.widget()
+        inner = content.layout() if content is not None else None
+        m = inner.contentsMargins() if inner is not None else None
+        sides = m.left() + m.right() if m is not None else 48
+        w = area.width() - 2 * area.frameWidth() - area.verticalScrollBar().sizeHint().width() - sides
+        return max(CARD_SMALLEST, w) if area.width() > 1 else CARD_MIN_WIDTH
 
     def card_width(self, note: Note, avail: int) -> int:
         cols, col = column_width(avail, CARD_GAP, CARD_MIN_WIDTH)
@@ -1178,7 +1185,7 @@ class NotesPage(TabPage):
     # ---- menus
 
     def note_item_menu(self, card: NoteCard, note: Note, item: NoteItem, pos: QPoint) -> None:
-        menu = QMenu(self)
+        menu = transient(QMenu(self))
         menu.addAction(_("Mark as open") if item.done else _("Mark as done")).triggered.connect(lambda: self.note_toggle(card, note, item))
         menu.addAction(_("Move up") + "\tAlt+↑").triggered.connect(lambda: self.note_move_item(card, note, item, -1))
         menu.addAction(_("Move down") + "\tAlt+↓").triggered.connect(lambda: self.note_move_item(card, note, item, +1))
@@ -1190,7 +1197,7 @@ class NotesPage(TabPage):
     def note_menu(self, note: Note, pos: QPoint) -> None:
         """Card settings: width, folding, colour, files, carrying over, deletion."""
         card = self.cards.get(note.id)
-        menu = QMenu(self)
+        menu = transient(QMenu(self))
         wide = QAction(_("Wide card"), menu)
         wide.setCheckable(True)
         wide.setChecked(note.span > 1)
@@ -1226,7 +1233,7 @@ class NotesPage(TabPage):
             act.triggered.connect(lambda _c=False, c=code: self.note_set_color(note, c))
 
     def note_color_menu(self, note: Note, pos: QPoint) -> None:
-        menu = QMenu(self)
+        menu = transient(QMenu(self))
         self._fill_color_menu(menu, note)
         menu.popup(pos)
         self.last_menu = menu
@@ -1296,7 +1303,7 @@ class NotesPage(TabPage):
     def file_menu(self, note: Note, att: Attachment, pos: QPoint) -> None:
         from ..dialogs.fileview import open_with_system, show_in_folder
 
-        menu = QMenu(self)
+        menu = transient(QMenu(self))
         menu.addAction(_("Open")).triggered.connect(lambda: self.open_attachment(att))
         def system() -> None:
             if att.exists():

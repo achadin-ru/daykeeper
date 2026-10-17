@@ -34,7 +34,7 @@ from .. import icons, theme
 from ..dialogs.base import Dialog, ask_text, ask_yes_no, button, label, show_error, show_info
 from ..jobs import Waker
 from ..timers import Debounce
-from ..widgets.common import fill_menu, more_button, scroll_area, search_field
+from ..widgets.common import fill_menu, more_button, scroll_area, search_field, transient
 from ..widgets.countlist import KEY_ROLE, add_count_item, count_list
 from ..widgets.tiles import Item, TileBoard, TilePainter, elide, rounded
 from .base import TabPage
@@ -45,9 +45,9 @@ REVEAL_SEC = 10
 RADIUS, ROW_RADIUS, BADGE_RADIUS = 12, 7, 11
 BADGE = 40  # px
 ICON_SIZE = 26  # the site icon on a badge, px at 100 %
-ROW_ICON = 14  # the drawn icons of the login and password rows, px
-MORE_ICON = 16  # the ⋯ of a tile
-LINK_ICON = 12  # before the name of the vault entry a bookmark is tied to
+ROW_ICON = theme.px(14)  # the drawn icons of the login and password rows, px
+MORE_ICON = theme.px(16)  # the ⋯ of a tile
+LINK_ICON = theme.px(12)  # before the name of the vault entry a bookmark is tied to
 PAD_X, PAD_Y = 14, 12
 TITLE_GAP = 4
 ROWS_GAP, ROW_PAD, ROW_GAP = 14, 14, 4
@@ -471,7 +471,7 @@ class BookmarksPage(TabPage):
             go()
 
     def tile_menu(self, bm: Bookmark, pos: QPoint) -> None:
-        menu = QMenu(self.board)
+        menu = transient(QMenu(self.board))
         items: list = [(_("Open"), lambda: self.open_bookmark(bm)), (_("Copy address"), lambda: self.shell.copy_to_clipboard(bm.url, secret=False)), (_("Edit…"), lambda: self.bookmark_dialog(bm))]
         if bm.url.startswith(("http://", "https://")) and self.site_icons_on():
             items.append((_("Refresh the site icon"), lambda: self._refresh_site(bm)))

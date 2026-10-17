@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QFrame, QSplitter, QVBoxLayout, QWidget
 
 from ...journal import today
 from ...revisions import VIEW_DOMAINS
+from .. import theme
 
 SIDEBAR_MARGINS = (16, 16, 12, 12)
 
@@ -60,7 +61,9 @@ class TabPage(QWidget):
 
     def split(self, sidebar_width: int = 300, minimum: int = 240) -> tuple[QSplitter, QFrame, QVBoxLayout, QFrame]:
         """The sidebar on the left and the card on the right; the card takes the resize and
-        the sidebar never collapses (the Tk window's SidebarKeeper)."""
+        the sidebar never collapses (the Tk window's SidebarKeeper). Both widths grow with
+        the system's text size, as the buttons and names in the sidebar do."""
+        sidebar_width, minimum = theme.px(sidebar_width), theme.px(minimum)
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.setChildrenCollapsible(False)
         splitter.setHandleWidth(1)

@@ -157,6 +157,7 @@ class SettingsWindow(QDialog):
 
     def __init__(self, shell: Any, section: str = "general"):
         super().__init__(shell)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # see dialogs.base.Dialog
         self.shell = shell
         self.setWindowTitle(_("Settings"))
         self.setModal(False)
@@ -187,7 +188,7 @@ class SettingsWindow(QDialog):
         nl.addSpacing(14)
         self.nav = QListWidget(nav)
         self.nav.setObjectName("SettingsNav")
-        self.nav.setIconSize(QSize(18, 18))
+        self.nav.setIconSize(QSize(theme.px(18), theme.px(18)))
         t = theme.current
         for name, text in sections():
             glyph, rest = icons.split(text)

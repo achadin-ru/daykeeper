@@ -16,12 +16,15 @@ from pathlib import Path
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import QApplication
 
-from .. import palette
+from .. import palette, win32
 
 BODY_PT = 10  # Qt's default on Windows is Segoe UI 9 pt, small next to the Tk window's text
 # Tk drew the layout for an 11 pt body; Qt measures points by the screen's DPI, so the
 # same numbers come out larger. Sizes below are the Tk ones times this, rounded.
 TK_TO_QT = BODY_PT / 11
+# Windows' "Text size" (Accessibility): Qt does not apply it to fonts of a given size, so
+# every size of the window is multiplied by it; read once, at start, as the system menus do
+TEXT_SCALE = win32.text_scale()
 
 
 @dataclass(frozen=True)
@@ -96,9 +99,17 @@ def current() -> Theme:
     return _current
 
 
-def font_pt(tk_size: float) -> int:
-    """A Tk font size of the old layout as Qt points (see TK_TO_QT)."""
-    return max(1, round(tk_size * TK_TO_QT))
+def px(n: float) -> int:
+    """A size that goes with the text (an icon beside a word, a list row), in px at the
+    system's text size."""
+    return round(n * TEXT_SCALE)
+
+
+def font_pt(tk_size: float) -> float:
+    """A Tk font size of the old layout as Qt points (see TK_TO_QT), times the system's
+    text size (TEXT_SCALE), to half a point."""
+    pt = max(1, round(tk_size * TK_TO_QT))
+    return pt if TEXT_SCALE == 1.0 else round(pt * TEXT_SCALE * 2) / 2
 
 
 def build_qss(t: Theme) -> str:
@@ -252,7 +263,7 @@ def body_font() -> QFont:
     font = QFont(QGuiApplication.font())
     if sys.platform == "win32":
         font.setFamily(palette.FONT)
-        font.setPointSize(BODY_PT)
+        font.setPointSizeF(BODY_PT * TEXT_SCALE)
     return font
 
 
@@ -305,7 +316,7 @@ def logo(size: int, ratio: float = 1.0) -> QPixmap | None:
 def font(tk_size: float, bold: bool = False, mono: bool = False) -> QFont:
     """A font of the old layout's size (`tk_size` in Tk points, see TK_TO_QT)."""
     f = QFont(palette.MONO) if mono else body_font()
-    f.setPointSize(font_pt(tk_size))
+    f.setPointSizeF(font_pt(tk_size))
     f.setBold(bold)
     return f
 

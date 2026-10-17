@@ -28,7 +28,7 @@ from ..dialogs.base import Dialog, ask_yes_no, button, label, paint_caption, reg
 from ..dialogs.fileview import open_with_system, show_in_folder
 from ..jobs import Waker
 from ..timers import Ticker
-from ..widgets.common import IconLabel, divider, fill_menu, scroll_area, section
+from ..widgets.common import IconLabel, divider, fill_menu, scroll_area, section, transient
 from ..widgets.countlist import COUNT_ROLE, count_list
 from ..widgets.tiles import Item, TileBoard, TilePainter, elide, glyph_text, glyph_text_width, rounded
 from ..widgets.toast import Toast
@@ -36,7 +36,7 @@ from .base import TabPage
 from ..errors import guard_events
 
 SCHEDULE_TICK_MS = 20_000
-MORE_ICON = 16  # the ⋯ of a tile, px
+MORE_ICON = theme.px(16)  # the ⋯ of a tile, px
 CLOCK_MS = 1000  # the seconds of a running routine on its tile and in its output window
 UNLOCK_DELAY_MS = 800  # the auto runs of an unlock wait for the main screen to be on screen
 KIND_LABELS = {"script": "Script", "command": "Command", "url": "Link", "folder": "Folder", "file": "File"}
@@ -551,7 +551,7 @@ class RoutinesPage(TabPage):
         self.shell.runs.open_output(next((x for x in self.shell.runs.runs if id(x) == key), None))
 
     def routine_menu(self, r: Routine, pos: QPoint) -> None:
-        menu = QMenu(self.board)
+        menu = transient(QMenu(self.board))
         items: list = [(_("▶ Run"), lambda: self.shell.runs.run_routine(r)), (_("Edit…"), lambda: self.routine_dialog(r))]
         if r.kind in ("script", "file", "folder") and r.target:
             items.append((_("Show in folder"), lambda: self._show_in_folder(r)))

@@ -50,6 +50,8 @@ class UnlockScreen(QWidget):
         self.subtitle = label("", "subtitle", panel)
         for lab in (self.title, self.tagline, self.subtitle):
             lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        for lab in (self.tagline, self.subtitle):  # at a large system text size they are wider than the field
+            lab.setWordWrap(True)
 
         self.pw1 = SecretEdit(panel)
         self.pw2 = SecretEdit(panel)
@@ -109,6 +111,7 @@ class UnlockScreen(QWidget):
     def _fit_width(self) -> None:
         """The panel is as wide as the password field wants and no wider: the labels under
         it wrap instead of stretching it."""
+        self.pw1.ensurePolished()  # the style sheet's font of a "big" field, not the default one
         field = self.pw1.fontMetrics().averageCharWidth() * FIELD_CHARS + 60  # padding and the eye
         margins = self._box.contentsMargins()
         self.panel.setFixedWidth(field + margins.left() + margins.right())

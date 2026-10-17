@@ -12,7 +12,7 @@ from __future__ import annotations
 import time
 
 from PySide6.QtCore import QAbstractListModel, QEvent, QModelIndex, QObject, QPersistentModelIndex, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QPainter
+from PySide6.QtGui import QColor, QFontMetrics, QIcon, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -41,7 +41,7 @@ from ...vault import DEFAULT_KIND, KINDS, MAIN_GROUP, Entry, Field, generate_pas
 from .. import icons, theme
 from ..dialogs.base import ask_text, ask_yes_no, button, label, show_info, show_warning
 from ..timers import Debounce
-from ..widgets.common import GlyphView, add_action, divider, fill_menu, icon_button, more_button, popup_below, scroll_area, search_field, section, set_glyph
+from ..widgets.common import GlyphView, add_action, divider, fill_menu, icon_button, more_button, popup_below, scroll_area, search_field, section, set_glyph, transient
 from ..widgets.flow import flow_host
 from ..widgets.secret_edit import SecretEdit
 from .base import TabPage
@@ -64,9 +64,9 @@ MAX_ROW_ICONS = 4  # more fields than this show as “+N”; the tooltip lists t
 ENTRY_KIND_ICONS = {"login": "🔑", "token": "🎟", "key": "🗝", "card": "💳", "note": "📝", "other": "📦"}
 SEARCH_SETTLE_MS = 150  # the list is filtered once the typing pauses this long
 MASK = "••••••••"
-ROW_HEIGHT = 32  # px of a list row
-LEFT_ICON = 16  # px, the kind of an entry before its name
-RIGHT_ICON = 14  # px, the filled fields at the right edge
+ROW_HEIGHT = theme.px(32)  # px of a list row
+LEFT_ICON = theme.px(16)  # px, the kind of an entry before its name
+RIGHT_ICON = theme.px(14)  # px, the filled fields at the right edge
 RIGHT_ROLE = Qt.ItemDataRole.UserRole + 1
 ENTRY_ROLE = Qt.ItemDataRole.UserRole + 2
 
@@ -214,6 +214,7 @@ class FieldRow(QWidget):
         self.grid.setHorizontalSpacing(4)
         self.grid.setVerticalSpacing(2)
         self.compact: bool | None = None
+        self._copy_wide = 0  # the one-line "Copy" button, see one_line_width
         self.set_compact(False)
         self.show_value()
 
@@ -229,10 +230,12 @@ class FieldRow(QWidget):
         if compact:
             self.grid.addWidget(self.key, 0, 0, 1, 6, Qt.AlignmentFlag.AlignLeft)
             self.grid.addWidget(self.value, 1, 0)
-            self.copy.setText("⧉")
+            self.copy.setText("")
+            self.copy.setIcon(icons.button("copy"))
         else:
             self.grid.addWidget(self.key, 0, 0)
             self.grid.addWidget(self.value, 0, 1)
+            self.copy.setIcon(QIcon())
             self.copy.setText(_("Copy"))
         col = 1 if compact else 2
         for i, b in enumerate((self.eye, self.copy, self.gen, self.lock, self.rm)):
@@ -241,9 +244,14 @@ class FieldRow(QWidget):
         self.grid.setColumnStretch(1, 0 if compact else 1)
 
     def one_line_width(self) -> int:
-        """The width the row takes on one line with a usable value field."""
-        widths = [self.key.width(), self.value.fontMetrics().averageCharWidth() * 18]
-        widths += [w.sizeHint().width() for w in (self.eye, self.copy, self.gen, self.lock, self.rm)]
+        """The width the row takes on one line with a usable value field — the same in both
+        layouts: measured with the wide "Copy" even while the narrow icon shows, else the
+        narrow button would call for one line, the wide one for two, and so on without end
+        (at a text size of 125 % that ping-pong overflowed the stack)."""
+        if not self.compact:
+            self._copy_wide = max(self._copy_wide, self.copy.sizeHint().width())
+        widths = [self.key.width(), self.value.fontMetrics().averageCharWidth() * 18, self._copy_wide]
+        widths += [w.sizeHint().width() for w in (self.eye, self.gen, self.lock, self.rm)]
         return sum(widths) + 4 * 7
 
     # ---- the value
@@ -847,7 +855,7 @@ class VaultPage(TabPage):
     def _show_add_field_menu(self) -> None:
         if self.current is None:
             return
-        menu = QMenu(self.add_field_btn)
+        menu = transient(QMenu(self.add_field_btn))
         for text, key, secret in FIELD_PRESETS:
             add_action(menu, _(text)).triggered.connect(lambda _c=False, k=key, s=secret: self.add_field(_(k), s))
         menu.addSeparator()
@@ -1003,7 +1011,7 @@ class VaultPage(TabPage):
         if not idx.isValid():
             return
         self.list.setCurrentIndex(idx)
-        menu = QMenu(self.list)
+        menu = transient(QMenu(self.list))
         fill_menu(menu, [(_("Up\tAlt+↑"), lambda: self.move_entry(-1)), (_("Down\tAlt+↓"), lambda: self.move_entry(+1)), None])
         move_to = menu.addMenu(_("Move to list"))
         for text in self._group_values():

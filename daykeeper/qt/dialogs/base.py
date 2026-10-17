@@ -57,6 +57,9 @@ class Dialog(QDialog):
 
     def __init__(self, parent: QWidget | None, title: str):
         super().__init__(parent)
+        # closed is gone: a dialog kept hidden would hold what it showed (a password typed
+        # into an editor) and slow every later restyle of the app (the theme switch)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setWindowTitle(title)
         self.setModal(True)
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
@@ -129,8 +132,10 @@ def ask_text(parent: QWidget | None, title: str, prompt: str, initial: str = "")
     dlg.box.addLayout(row, 2, 0)
     dlg.keys(dlg.accept)
     entry.setFocus()
-    ok = dlg.exec() == QDialog.DialogCode.Accepted
-    return entry.text() if ok else None
+    answer: list[str] = []
+    dlg.accepted.connect(lambda: answer.append(entry.text()))  # read before the dialog goes
+    dlg.exec()
+    return answer[0] if answer else None
 
 
 def ask_secret(parent: QWidget | None, title: str, prompt: str, button_text: str, accept: Callable[[str], bool | str], then: Callable[[], object]) -> Dialog:
@@ -170,6 +175,7 @@ def ask_secret(parent: QWidget | None, title: str, prompt: str, button_text: str
 
 def _box(parent: QWidget | None, icon: QMessageBox.Icon, text: str, buttons: QMessageBox.StandardButton) -> QMessageBox:
     box = QMessageBox(icon, palette.APP_TITLE, text, buttons, parent)
+    box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
     names = {
         QMessageBox.StandardButton.Ok: _("OK"),
         QMessageBox.StandardButton.Yes: _("Yes"),
