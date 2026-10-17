@@ -33,6 +33,11 @@ def make_pem(not_after: dt.datetime) -> str:
     return cert.public_bytes(serialization.Encoding.PEM).decode("ascii")
 
 
+def local_date(moment: dt.datetime) -> date:
+    """The date of an aware moment in this machine's time zone, as the app shows it."""
+    return moment.astimezone().date()
+
+
 class NoPeekSealer(Sealer):
     """Fails the test when a secret value is unsealed."""
 
@@ -80,9 +85,14 @@ class ParseDateTest(unittest.TestCase):
 
 class CertTest(unittest.TestCase):
     def test_self_signed_pem(self):
-        pem = make_pem(dt.datetime(2027, 1, 15, 12, 0, tzinfo=dt.UTC))
-        self.assertEqual(cert_expiry(pem), date(2027, 1, 15))
-        self.assertEqual(cert_expiry("\n  " + pem), date(2027, 1, 15))
+        not_after = dt.datetime(2027, 1, 15, 12, 0, tzinfo=dt.UTC)
+        pem = make_pem(not_after)
+        self.assertEqual(cert_expiry(pem), local_date(not_after))
+        self.assertEqual(cert_expiry("\n  " + pem), local_date(not_after))
+
+    def test_the_date_is_local_not_utc(self):
+        not_after = dt.datetime(2027, 3, 9, 23, 30, tzinfo=dt.UTC)
+        self.assertEqual(cert_expiry(make_pem(not_after)), local_date(not_after))
 
     def test_not_a_certificate(self):
         self.assertIsNone(cert_expiry(""))
@@ -128,10 +138,12 @@ class ExpiringTest(unittest.TestCase):
         self.assertEqual(expiring(v, TODAY, 7, {})[1].key, "t1:valid until")
 
     def test_certificate_in_an_open_field(self):
-        pem = make_pem(dt.datetime(2026, 10, 19, tzinfo=dt.UTC))
+        not_after = dt.datetime(2026, 10, 19, 12, 0, tzinfo=dt.UTC)
+        pem = make_pem(not_after)
+        days = (local_date(not_after) - TODAY).days
         e = Entry("VPN", [Field("cert", pem), Field("", pem)], id="v1")
         found = expiring(vault_of(e), TODAY, 7, {})
-        self.assertEqual([(x.field, x.days_left) for x in found], [("cert", 2), ("certificate", 2)])
+        self.assertEqual([(x.field, x.days_left) for x in found], [("cert", days), ("certificate", days)])
 
     def test_secret_fields_are_never_unsealed(self):
         sealer = NoPeekSealer()

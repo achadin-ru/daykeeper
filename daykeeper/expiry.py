@@ -98,7 +98,9 @@ def parse_date(text: str, today: date) -> date | None:
 
 
 def cert_expiry(pem: str) -> date | None:
-    """The last day of a PEM certificate (UTC), or None when the text is not one."""
+    """The last day of a PEM certificate in LOCAL time (it is compared with a local
+    `today`; the UTC date can be a day off near midnight), or None when the text is not
+    one."""
     text = (pem or "").strip()
     if not text.startswith(CERT_HEAD):
         return None
@@ -108,7 +110,7 @@ def cert_expiry(pem: str) -> date | None:
         cert = x509.load_pem_x509_certificate(text.encode("ascii", "replace"))
     except ValueError:
         return None
-    return cert.not_valid_after_utc.date()
+    return cert.not_valid_after_utc.astimezone().date()
 
 
 _DATE_NAMES: set[str] = set()
