@@ -17,7 +17,7 @@ from typing import Any
 
 from PySide6.QtCore import QPoint, QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QColor, QFontMetrics, QKeySequence, QPainter, QShortcut
-from PySide6.QtWidgets import QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPlainTextEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidgetItem, QMenu, QPlainTextEdit, QVBoxLayout, QWidget
 
 from ... import palette
 from ...i18n import _
@@ -28,6 +28,7 @@ from ..dialogs.base import Dialog, ask_yes_no, button, label, paint_caption, reg
 from ..dialogs.fileview import open_with_system, show_in_folder
 from ..timers import Ticker
 from ..widgets.common import divider, fill_menu, scroll_area, section
+from ..widgets.countlist import COUNT_ROLE, count_list
 from ..widgets.tiles import Item, TileBoard, TilePainter, elide, rounded
 from ..widgets.toast import Toast
 from .base import TabPage
@@ -425,7 +426,7 @@ class RoutinesPage(TabPage):
         col.addLayout(self.today_box)
         col.addSpacing(6)
         col.addWidget(section(_("RUN LOG"), left))
-        self.log = QListWidget(left)
+        self.log = count_list(left)
         self.log.setToolTip(_("Double-click shows the output"))
         self.log.itemDoubleClicked.connect(self._open_log_entry)
         col.addWidget(self.log, 1)
@@ -511,6 +512,7 @@ class RoutinesPage(TabPage):
             item = self.today_box.takeAt(0)
             widget = item.widget() if item is not None else None
             if widget is not None:
+                widget.hide()
                 widget.deleteLater()
         now = now_local()
         today = [(r.schedule.valid_time(), r) for r in self.vault.routines.ordered() if r.schedule.valid_time() and now.weekday() in r.schedule.days]
@@ -527,8 +529,9 @@ class RoutinesPage(TabPage):
         self.log.clear()
         for run in self.shell.runs.runs:
             code = "…" if run.running else ("✓" if run.code == 0 else f"✗ {run.code}")
-            log_row = QListWidgetItem(f"{time.strftime('%H:%M', time.localtime(run.started))}  {run.routine.name}    {code}", self.log)
+            log_row = QListWidgetItem(f"{time.strftime('%H:%M', time.localtime(run.started))}  {run.routine.name}", self.log)
             log_row.setData(RUN_ROLE, id(run))
+            log_row.setData(COUNT_ROLE, code)
 
     def _open_log_entry(self, item: QListWidgetItem) -> None:
         key = item.data(RUN_ROLE)

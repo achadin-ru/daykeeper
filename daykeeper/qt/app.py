@@ -150,6 +150,7 @@ class MainScreen(QWidget):
     def build_tabs(self, modes: list[str]) -> None:
         for btn in self.tab_buttons.values():
             self.tabs_row.removeWidget(btn)
+            btn.hide()  # until the deferred delete runs it would still paint where it was
             btn.deleteLater()
         self.tab_buttons = {}
         for n, mode in enumerate(modes, 1):
@@ -201,6 +202,7 @@ class MainScreen(QWidget):
             if page is None:
                 break
             self.pages.removeWidget(page)
+            page.hide()
             page.deleteLater()
         self.status.setText("")
 
@@ -464,6 +466,7 @@ class MainWindow(QMainWindow):
         stack = self.main_screen.pages
         stack.insertWidget(stack.indexOf(old), page)
         stack.removeWidget(old)
+        old.hide()
         old.deleteLater()
         self._shown_keys.pop(name, None)
         if name == "vault":

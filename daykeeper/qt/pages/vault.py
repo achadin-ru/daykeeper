@@ -294,6 +294,7 @@ class FieldsBox(QWidget):
         for row in self.rows:
             row.wipe()
             self.col.removeWidget(row)
+            row.hide()
             row.deleteLater()
         self.rows = []
 

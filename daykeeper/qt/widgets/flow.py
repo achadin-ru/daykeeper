@@ -42,11 +42,9 @@ class FlowLayout(QLayout):
         self._lay_out(rect, apply=True)
 
     def sizeHint(self) -> QSize:
-        """One line of everything: what the row asks for when the room is there."""
-        m = self.contentsMargins()
-        w = sum(i.sizeHint().width() for i in self._visible()) + self._h * max(0, len(self._visible()) - 1)
-        h = max((i.sizeHint().height() for i in self._visible()), default=0)
-        return QSize(w + m.left() + m.right(), h + m.top() + m.bottom())
+        """The widest item: a flow asks for no more than one item's width and wraps the rest
+        (one line of everything made a scroll area as wide as all the items together)."""
+        return self.minimumSize()
 
     def minimumSize(self) -> QSize:
         size = QSize()
