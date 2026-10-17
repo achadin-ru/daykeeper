@@ -61,7 +61,7 @@ class Run:
                 creationflags=flags,
                 start_new_session=sys.platform != "win32",  # its own group: Stop ends the children too
             )
-        except OSError as exc:
+        except (OSError, ValueError) as exc:  # ValueError: a NUL or a bad argument the OS cannot take
             self.proc = None
             self.lines.append(str(exc))
             self.code = -1

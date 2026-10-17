@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import tempfile
 import tkinter as tk
+from tkinter import ttk
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -237,6 +238,33 @@ class RoutineAcceptanceTest(unittest.TestCase):
         self.assertNotEqual(self.routine.target_hash, accepted, "the new version is the accepted one")
         self.app.runs.run_routine(self.routine, auto=True)
         self.assertEqual(len(self.started), 3)
+
+    def test_saving_in_the_editor_keeps_the_event_triggers(self) -> None:
+        from daykeeper.dialogs import Dialog
+
+        self.routine.schedule.on_events = ["merged", "watch_failed"]
+        self.routine.schedule.projects = ["group/repo"]
+        self.app.session.touch("routines")
+        self.app.show_page("routines")
+        self.app.finish_chunks("routines")
+        self.app.update()
+        page = self.app.pages["routines"]
+        page.routine_dialog(self.routine)
+        self.app.update()
+        dlg = next(c for c in self.app.winfo_children() if isinstance(c, Dialog))
+
+        def buttons(w):
+            for c in w.winfo_children():
+                if isinstance(c, ttk.Button):
+                    yield c
+                yield from buttons(c)
+
+        save = next(b for b in buttons(dlg) if str(b.cget("text")) == "Save")
+        save.invoke()
+        self.app.update()
+        self.assertFalse(dlg.winfo_exists(), "saved and closed")
+        self.assertEqual(self.routine.schedule.on_events, ["merged", "watch_failed"], "the editor has no field for them: kept")
+        self.assertEqual(self.routine.schedule.projects, ["group/repo"])
 
 
 @unittest.skipUnless(has_display(), "no display")

@@ -49,6 +49,13 @@ class RunTest(unittest.TestCase):
         self.assertEqual(run.code, -1)
         self.assertEqual(len(run.lines), 1)
 
+    def test_a_nul_in_the_command_ends_the_run_with_the_error(self):
+        run = Run(_Routine(), [sys.executable, "-c", "print('x')", "a\0b"], "", "", env={"DAYKEEPER_TITLE": "t\0"})
+        self.assertFalse(run.running)
+        self.assertEqual(run.code, -1)
+        self.assertEqual(len(run.lines), 1)
+        self.assertTrue(run.lines[0])
+
     def test_extra_environment_reaches_the_child(self):
         code = "import os; print(os.environ['DAYKEEPER_REF']); print(os.environ.get('PYTHONUTF8')); print('PATH' in os.environ)"
         run = Run(_Routine(), [sys.executable, "-c", code], "", "", auto=True, env={"DAYKEEPER_REF": "group/repo!12"})

@@ -81,6 +81,14 @@ class PipelineWatchTest(unittest.TestCase):
         self.gl.pipe("group/repo", "main", 3, "failed")
         self.assertEqual([e.kind for e in self.look()], ["watch_failed"], "the next night red again is news again")
 
+    def test_the_list_has_no_finished_at_so_updated_at_stands_in(self):
+        self.gl.pipe("group/repo", "main", 1, "failed")
+        row = self.gl.pipelines[("group/repo", "main")][0]
+        del row["finished_at"]
+        row["updated_at"] = "2026-10-18T04:00:00Z"
+        self.look()
+        self.assertEqual(self.state[self.watch.key()]["finished_at"], "2026-10-18T04:00:00Z")
+
     def test_green_again_skips_a_running_pipeline(self):
         self.gl.pipe("group/repo", "main", 1, "failed")
         self.look()

@@ -549,6 +549,8 @@ def _watch_pipelines(client: GitLabClient, watches: list[PipelineWatch], old: di
             out[w.key()] = kept
             continue
         newest = max(done, key=lambda p: number(int, p.get("id"), 0))
+        # the pipelines LIST gives no finished_at (only the single-pipeline endpoint does):
+        # updated_at stands in for it, the last change of a finished pipeline is its end
         out[w.key()] = {
             "status": str(newest.get("status", "")), "id": number(int, newest.get("id"), 0), "url": web_url(newest.get("web_url")),
             "finished_at": str(newest.get("finished_at") or newest.get("updated_at") or ""), "sha": str(newest.get("sha", "")),

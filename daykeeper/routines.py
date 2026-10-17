@@ -18,6 +18,7 @@ import shutil
 import struct
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -239,33 +240,41 @@ def event_project(ev: Event) -> str:
 
 def event_context(ev: Event, translate=lambda text: text) -> dict[str, str]:
     """The DAYKEEPER_* values a routine started by `ev` gets. The text is as in the feed:
-    `translate` is the UI translator, the args are filled in."""
+    `translate` is the UI translator, the args are filled in. NUL characters are dropped:
+    an environment variable or an argument cannot carry one (Popen refuses the run)."""
     try:
         text = translate(ev.text).format(**ev.args)
     except (KeyError, IndexError, ValueError, AttributeError):
         text = ev.text
     values = {"event": ev.kind, "source": ev.source, "ref": ev.mr, "url": ev.url, "title": ev.title, "project": event_project(ev), "text": text}
-    return {ARG_NAMES[k]: str(v) for k, v in values.items()}
+    return {ARG_NAMES[k]: str(v).replace("\0", "") for k, v in values.items()}
 
 
 def quote_arg(value: str, platform: str = sys.platform) -> str:
     """`value` written so that `split_args` gives it back as one argument: a title with
-    spaces or quotes from someone else's MR stays one argument and adds no others."""
+    spaces or quotes from someone else's MR stays one argument and adds no others. A line
+    break becomes a space (it would cut a cmd line in two). On Windows a double quote
+    becomes a single one, and `%` becomes the fullwidth `％` (U+FF05): cmd expands
+    `%VAR%` even inside quotes, in a command routine and a .bat/.cmd script, so a title
+    `%SOME_TOKEN%` would hand the app's environment to the script. The DAYKEEPER_*
+    environment variables carry the exact text."""
+    value = value.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
     if platform != "win32":
         return shlex.quote(value)
-    return '"' + value.replace('"', "'") + '"'
+    return '"' + value.replace('"', "'").replace("%", "％") + '"'
 
 
-def fill_args(args: str, context: dict[str, str], quote=None) -> str:
+def fill_args(args: str, context: dict[str, str], quote: Callable[[str], str] = quote_arg) -> str:
     """{event}, {ref}, {url}, {title}, {project}, {source}, {text} in the arguments → the
     values of `context` (event_context); any other brace stays as typed. `quote` — how a
-    value is written (quote_arg for a script; None — as it is)."""
+    value is written: by default `quote_arg` for this platform, so event text anyone can
+    set (an MR title) stays one argument; pass another function for another shell."""
 
     def put(m: re.Match) -> str:
         var = ARG_NAMES.get(m.group(1))
         if var is None or var not in context:
             return m.group(0)
-        return quote(context[var]) if quote else context[var]
+        return quote(context[var])
 
     return re.sub(r"\{(\w+)\}", put, args)
 

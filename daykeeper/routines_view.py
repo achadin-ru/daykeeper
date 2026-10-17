@@ -560,6 +560,8 @@ class RoutinesPage(TabPage):
             if schedule.at and schedule.valid_time() is None:
                 err.config(text=_("Time must look like 09:30"))
                 return
+            if r is not None:  # no fields for these yet: keep what the routine has
+                schedule.on_events, schedule.projects = list(r.schedule.on_events), list(r.schedule.projects)
             fields = {
                 "name": name_var.get().strip() or os.path.basename(target) or target, "kind": k, "target": target,
                 "args": args_var.get().strip() if k == "script" else "", "cwd": cwd_var.get().strip() if k in ("script", "command") else "",

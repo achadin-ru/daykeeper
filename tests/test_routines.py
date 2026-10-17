@@ -145,7 +145,8 @@ class EventRoutinesTest(unittest.TestCase):
 
     def test_fill_args_leaves_an_unknown_brace(self):
         ctx = event_context(MERGED)
-        self.assertEqual(fill_args("--ref {ref} --url={url} {unknown} {} {{x}}", ctx), "--ref group/repo!12 --url=https://gitlab.example.com/group/repo/-/merge_requests/12 {unknown} {} {{x}}")
+        raw = lambda v: v  # noqa: E731
+        self.assertEqual(fill_args("--ref {ref} --url={url} {unknown} {} {{x}}", ctx, quote=raw), "--ref group/repo!12 --url=https://gitlab.example.com/group/repo/-/merge_requests/12 {unknown} {} {{x}}")
         self.assertEqual(fill_args("{event} {project}", {}), "{event} {project}")
 
     def test_a_quoted_value_stays_one_argument(self):
@@ -156,6 +157,29 @@ class EventRoutinesTest(unittest.TestCase):
             self.assertEqual(len(parts), 3, (platform, parts))
             self.assertEqual(parts[0], "--title")
         self.assertEqual(split_args(fill_args("{title}", ctx, quote=lambda v: quote_arg(v, "linux")), "linux"), [ctx["DAYKEEPER_TITLE"]])
+
+    def test_values_are_quoted_by_default(self):
+        ctx = {"DAYKEEPER_TITLE": 'a" --flag "b'}
+        parts = split_args(fill_args("--title {title}", ctx))
+        self.assertEqual(len(parts), 2, parts)
+        self.assertEqual(parts[0], "--title")
+        self.assertNotIn("--flag", parts)
+
+    def test_windows_values_lose_percent_and_line_breaks(self):
+        ctx = {"DAYKEEPER_TITLE": "%SOME_TOKEN% line1\r\nline2\nline3\rend"}
+        args = fill_args("{title}", ctx, quote=lambda v: quote_arg(v, "win32"))
+        self.assertNotIn("%", args, "cmd must find no %VAR% to expand")
+        self.assertNotIn("\n", args)
+        self.assertNotIn("\r", args)
+        self.assertEqual(split_args(args, "win32"), ["％SOME_TOKEN％ line1 line2 line3 end"])
+        posix = split_args(fill_args("{title}", ctx, quote=lambda v: quote_arg(v, "linux")), "linux")
+        self.assertEqual(posix, ["%SOME_TOKEN% line1 line2 line3 end"], "posix quoting keeps %, still drops line breaks")
+
+    def test_event_context_drops_nul(self):
+        ev = Event("merged", "group/repo!12", "Fix\0 the\0 login", "https://gitlab.example.com/x\0", "t\0ext", {})
+        ctx = event_context(ev)
+        self.assertTrue(all("\0" not in v for v in ctx.values()), ctx)
+        self.assertEqual((ctx["DAYKEEPER_TITLE"], ctx["DAYKEEPER_URL"], ctx["DAYKEEPER_TEXT"]), ("Fix the login", "https://gitlab.example.com/x", "text"))
 
     def test_the_storm_limit(self):
         rs = Routines()
