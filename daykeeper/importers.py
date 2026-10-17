@@ -11,6 +11,7 @@ import binascii
 import csv
 import io
 import json
+import os
 import re
 import xml.etree.ElementTree as ET  # noqa: S405 — parsed only after the DOCTYPE check below
 from dataclasses import dataclass, field
@@ -81,15 +82,36 @@ def detect(data: bytes, suffix: str) -> str | None:
     return None
 
 
+def _too_large() -> ImportFailed:
+    return ImportFailed(_("The file is larger than {n} MB").format(n=MAX_BYTES // (1024 * 1024)))
+
+
+def check_size(path: str | os.PathLike[str]) -> None:
+    """Refuse a file above MAX_BYTES by its size on disk, before it is read into memory
+    (the window calls this first; `read` checks the bytes again). An unreadable file is
+    left to the reading itself."""
+    try:
+        size = os.stat(path).st_size
+    except OSError:
+        return
+    if size > MAX_BYTES:
+        raise _too_large()
+
+
 def read(data: bytes, fmt: str) -> list[Imported]:
     """Items of an export in the format `detect` named. ImportFailed with a message for the
-    user when the file is too large, unsafe, encrypted or damaged."""
+    user when the file is too large, unsafe, encrypted or damaged. Check the size on disk
+    with `check_size` before reading the file."""
     if len(data) > MAX_BYTES:
-        raise ImportFailed(_("The file is larger than {n} MB").format(n=MAX_BYTES // (1024 * 1024)))
+        raise _too_large()
     readers = {KEEPASS_XML: read_keepass_xml, KEEPASS_CSV: read_keepass_csv, BITWARDEN_JSON: read_bitwarden_json, BITWARDEN_CSV: read_bitwarden_csv}
     if fmt not in readers:
         raise ImportFailed(_("Unknown export format"))
-    return readers[fmt](data)
+    try:
+        return readers[fmt](data)
+    except (RecursionError, MemoryError) as exc:  # nesting too deep for the parser, a file that swells when parsed
+        damaged = {KEEPASS_XML: _("Damaged XML file"), BITWARDEN_JSON: _("Damaged JSON file")}.get(fmt) or _("Damaged CSV file")
+        raise ImportFailed(damaged) from exc
 
 
 def _text(data: bytes) -> str:
@@ -126,7 +148,7 @@ def parse_xml(data: bytes) -> ET.Element:
     refused before the parser sees a byte — the "billion laughs" and external entities
     need one; only UTF-8 is accepted, so the check reads what the parser will read."""
     if len(data) > MAX_BYTES:
-        raise ImportFailed(_("The file is larger than {n} MB").format(n=MAX_BYTES // (1024 * 1024)))
+        raise _too_large()
     text = _text(data)
     m = ENCODING_RE.match(text)
     if m and m.group(1).strip().lower().replace("_", "-") not in ("utf-8", "utf8"):
@@ -229,17 +251,17 @@ def read_keepass_xml(data: bytes) -> list[Imported]:
     if root is None:
         return []
     items: list[Imported] = []
-
-    def walk(g: ET.Element, path: list[str]) -> None:
-        group = GROUP_SEP.join(path)
+    # depth first with a stack of its own: a file with thousands of nested groups must not
+    # run into the recursion limit; children go on reversed to keep the order of the file
+    stack: list[tuple[ET.Element, str]] = [(root, "")]
+    while stack:
+        g, group = stack.pop()
         for e in g.findall("Entry"):  # direct children only: Entry/History holds old versions
             items.append(_keepass_entry(e, group))
-        for child in g.findall("Group"):
-            if bin_uuid and (child.findtext("UUID") or "").strip() == bin_uuid:
-                continue
-            walk(child, [*path, (child.findtext("Name") or "").strip() or "…"])
-
-    walk(root, [])
+        children = [c for c in g.findall("Group") if not (bin_uuid and (c.findtext("UUID") or "").strip() == bin_uuid)]
+        for child in reversed(children):
+            name = (child.findtext("Name") or "").strip() or "…"
+            stack.append((child, f"{group}{GROUP_SEP}{name}" if group else name))
     return items
 
 
@@ -303,8 +325,13 @@ def _obj(item: dict, key: str) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def _bw_code(value: object) -> int | None:
+    """A Bitwarden type code: an int, never a bool (True == 1 would pass for a login)."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 def _bw_item(item: dict, folders: dict[str, str]) -> Imported | None:
-    kind_code = item.get("type")
+    kind_code = _bw_code(item.get("type"))
     if kind_code not in BW_KINDS:
         return None
     group = folders.get(str(item.get("folderId") or ""), "")
@@ -340,7 +367,7 @@ def _bw_item(item: dict, folders: dict[str, str]) -> Imported | None:
         _add(fields, "private key", ssh.get("privateKey"), True)
         _add(fields, "fingerprint", ssh.get("keyFingerprint"), False)
     for f in item.get("fields") or []:
-        if isinstance(f, dict) and f.get("type") in (BW_FIELD_TEXT, BW_FIELD_HIDDEN, BW_FIELD_BOOLEAN):
+        if isinstance(f, dict) and _bw_code(f.get("type")) in (BW_FIELD_TEXT, BW_FIELD_HIDDEN, BW_FIELD_BOOLEAN):
             _add(fields, str(f.get("name") or "").strip() or _("value"), f.get("value"), f.get("type") == BW_FIELD_HIDDEN)
     return Imported(str(item.get("name") or "").strip(), BW_KINDS[kind_code], group, fields, str(item.get("notes") or "").strip())
 

@@ -192,6 +192,29 @@ class KeePassXmlTest(unittest.TestCase):
         with self.assertRaises(im.ImportFailed):
             im.read(b"x", "unknown")
 
+    def test_size_checked_on_disk_before_reading(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "export.xml"
+            path.write_bytes(b"<KeePassFile/>")
+            im.check_size(path)  # small: fine
+            with path.open("r+b") as f:
+                f.truncate(im.MAX_BYTES + 1)  # sparse on disk, nothing is written or read
+            with self.assertRaises(im.ImportFailed) as ctx:
+                im.check_size(str(path))
+            self.assertIn("50 MB", str(ctx.exception))
+            im.check_size(Path(tmp) / "missing.xml")  # left to the reading
+
+    def test_deeply_nested_groups(self):
+        depth = 3000  # far past the recursion limit of a recursive walk
+        doc = (
+            "<KeePassFile><Root><Group><Name>Database</Name>" + "<Group><Name>g</Name>" * depth
+            + "<Entry><String><Key>Title</Key><Value>Deep</Value></String></Entry>"
+            + "</Group>" * depth + "</Group></Root></KeePassFile>"
+        )
+        (deep,) = im.read(doc.encode(), im.KEEPASS_XML)
+        self.assertEqual(deep.name, "Deep")
+        self.assertEqual(deep.group, im.GROUP_SEP.join(["g"] * depth))
+
 
 class KeePassCsvTest(unittest.TestCase):
     def test_keepassxc(self):
@@ -245,6 +268,22 @@ class BitwardenTest(unittest.TestCase):
             im.read(json.dumps({"encrypted": True, "passwordProtected": True, "data": "x"}).encode(), im.BITWARDEN_JSON)
         with self.assertRaises(im.ImportFailed):
             im.read(b"{not json", im.BITWARDEN_JSON)
+
+    def test_deep_nesting_is_a_damaged_file(self):
+        depth = 100_000
+        doc = '{"items": ' + "[" * depth + "]" * depth + "}"
+        with self.assertRaises(im.ImportFailed) as ctx:
+            im.read(doc.encode(), im.BITWARDEN_JSON)
+        self.assertEqual(str(ctx.exception), "Damaged JSON file")
+
+    def test_type_must_be_a_number_not_a_bool(self):
+        doc = {"items": [
+            {"type": True, "name": "Bool type", "login": {"password": "demo-pass"}},
+            {"type": 1, "name": "Demo login", "fields": [{"name": "Flag", "value": "x", "type": True}]},
+        ]}
+        (item,) = im.read(json.dumps(doc).encode(), im.BITWARDEN_JSON)
+        self.assertEqual(item.name, "Demo login")
+        self.assertEqual(item.fields, [])  # a custom field with a bool type is not a hidden one
 
     def test_csv(self):
         items = by_name(im.read(("﻿" + BITWARDEN_CSV).encode(), im.BITWARDEN_CSV))
