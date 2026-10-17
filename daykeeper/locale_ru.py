@@ -864,4 +864,5 @@ RU: dict[str, str] = {
     'Dark': 'Тёмное',
     'Restart now': 'Перезапустить',
     'Takes effect after a restart: the app asks for the master password again.': 'Применится после перезапуска: приложение снова спросит мастер-пароль.',
+    'Call {date}': 'Созвон {date}',
 }
