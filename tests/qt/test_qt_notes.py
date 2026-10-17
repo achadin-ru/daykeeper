@@ -143,6 +143,44 @@ class NoteCardTest(unittest.TestCase):
         pump(20)
         self.assertEqual(self.note.open_items()[-1].text, "left behind")
 
+    def saved_items(self) -> list[str]:
+        from daykeeper.vault import Vault
+
+        saved = Vault.open(self.win.vault_path, "test-master-1")
+        return [i.text for n in saved.notes.notes if n.id == self.note.id for i in n.items]
+
+    def test_text_in_the_add_row_is_saved_by_a_lock(self):
+        """Typed but not yet an item: the lock saves it as one (the Tk window lost it)."""
+        self.card.edit("add")
+        type_text(self.card.editor, "typed before the lock")
+        self.win.lock()
+        pump()
+        self.assertIn("typed before the lock", self.saved_items())
+
+    def test_text_in_the_add_row_is_saved_by_closing_the_window(self):
+        self.card.edit("add")
+        type_text(self.card.editor, "typed before closing")
+        self.win.close()
+        pump()
+        self.assertIn("typed before closing", self.saved_items())
+
+    def test_text_in_the_add_row_is_kept_by_a_language_switch(self):
+        self.card.edit("add")
+        type_text(self.card.editor, "typed before the switch")
+        self.win.set_ui_language("ru")
+        pump()
+        self.assertIn("typed before the switch", [i.text for i in self.note.items])
+
+    def test_the_add_row_of_a_note_an_undo_replaced_goes_nowhere(self):
+        """An undo rebuilds the day with new note objects: the text left in the old card must
+        not be appended to a note nothing saves any more (it is dropped, as the undo asks)."""
+        self.card.add_text = "stale"
+        stale = self.card.note
+        self.win.vault.notes.notes = [n for n in self.win.vault.notes.notes if n is not stale]
+        before = len(stale.items)
+        self.page.commit_left_item(self.card)
+        self.assertEqual(len(stale.items), before)
+
     def test_folding_and_the_dragged_height(self):
         self.click("fold")
         self.assertTrue(self.note.hide_done)

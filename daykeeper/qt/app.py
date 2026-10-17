@@ -453,6 +453,7 @@ class MainWindow(QMainWindow):
             return
         self._locking = True  # the conflict question waits in its own loop: the idle tick must not ask again
         try:
+            self.flush_edits()
             self._clip_wipe.flush()
             self._save_or_keep_copy()
         finally:
@@ -552,6 +553,7 @@ class MainWindow(QMainWindow):
         """Switch the UI language now; the choice is kept in settings.json."""
         if code == language():
             return
+        self.flush_edits()
         self.save_now()
         self.session.write_settings({"language": code})
         set_language(code)
@@ -617,6 +619,13 @@ class MainWindow(QMainWindow):
         self._save.touch()
         if self.history is not None:
             self._capture.touch()
+
+    def flush_edits(self) -> None:
+        """What is typed but lives only in a page goes into the vault (TabPage.flush_edits)."""
+        if self.vault is None:
+            return
+        for page in list(self.pages.values()):
+            page.flush_edits()
 
     def save_now(self) -> str:
         """"ok", "conflict" (another window saved the file) or "error"."""
@@ -876,6 +885,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._clip_wipe.flush()  # the wipe timer dies with the window: a copied password would stay
+        self.flush_edits()
         self._save_or_keep_copy()
         self._save_window()
         self.close_settings()

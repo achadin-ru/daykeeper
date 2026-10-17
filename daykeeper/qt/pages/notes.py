@@ -17,6 +17,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+import shiboken6
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QIcon, QKeyEvent, QMouseEvent, QPainter, QPainterPath, QPaintEvent, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import QApplication, QFileDialog, QHBoxLayout, QLineEdit, QListWidgetItem, QMenu, QPlainTextEdit, QToolTip, QVBoxLayout, QWidget
@@ -1144,9 +1145,19 @@ class NotesPage(TabPage):
             card.edit("add")
 
     def commit_left_item(self, card: NoteCard) -> None:
-        """The text left in “Add item” becomes an item once the user is elsewhere in the app."""
-        if card.add_text.strip():
-            self.note_add_item(card, card.note, keep_focus=False)
+        """The text left in “Add item” becomes an item once the user is elsewhere in the app —
+        unless the note it was typed into is no longer the vault's (an undo rebuilt the day
+        in between: the item would go into a note nothing saves)."""
+        if not card.add_text.strip() or self.vault is None:
+            return
+        if not any(n is card.note for n in self.vault.notes.notes):
+            return
+        self.note_add_item(card, card.note, keep_focus=False)
+
+    def flush_edits(self) -> None:
+        for card in list(self.cards.values()):
+            if shiboken6.isValid(card):
+                self.commit_left_item(card)
 
     def note_toggle(self, card: NoteCard, note: Note, item: NoteItem) -> None:
         note.toggle(item)
@@ -1340,6 +1351,8 @@ class NotesPage(TabPage):
     def note_attach(self, note: Note, paths: list[str] | None = None) -> None:
         if paths is None:
             paths, _filter = QFileDialog.getOpenFileNames(self.shell, _("Attach files to the note"), "", _("Markdown and text") + " (*.md *.markdown *.txt);;" + _("All files") + " (*.*)")
+            if not shiboken6.isValid(self) or self.vault is None:  # the idle lock does not wait for a file dialog: the window may have locked under it
+                return
         added = sum(1 for p in paths if note.attach(p) is not None)
         if not added:
             return

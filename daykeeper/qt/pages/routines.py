@@ -15,6 +15,7 @@ import time
 import webbrowser
 from typing import Any
 
+import shiboken6
 from PySide6.QtCore import QPoint, QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QColor, QFontMetrics, QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidgetItem, QMenu, QPlainTextEdit, QVBoxLayout, QWidget
@@ -37,6 +38,7 @@ from ..errors import guard_events
 
 SCHEDULE_TICK_MS = 20_000
 MORE_ICON = theme.px(16)  # the ⋯ of a tile, px
+OUTPUT_LINES = 20_000  # the output window shows the last this many lines of a run
 CLOCK_MS = 1000  # the seconds of a running routine on its tile and in its output window
 UNLOCK_DELAY_MS = 800  # the auto runs of an unlock wait for the main screen to be on screen
 KIND_LABELS = {"script": "Script", "command": "Command", "url": "Link", "folder": "Folder", "file": "File"}
@@ -93,8 +95,8 @@ class OutputWindow(QWidget):
         self.text.setReadOnly(True)
         self.text.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         self.text.setFont(theme.font(10, mono=True))
-        for line in run.lines:
-            self.text.appendPlainText(line)
+        self.text.setMaximumBlockCount(OUTPUT_LINES)  # a script printing a million lines keeps the window usable
+        self.text.setPlainText("\n".join(run.lines[-OUTPUT_LINES:]))  # one layout, not one per line
         col.addWidget(self.text, 1)
         QShortcut(QKeySequence("Escape"), self, self.close)
         self.refresh()
@@ -107,10 +109,11 @@ class OutputWindow(QWidget):
         self.close()
         self.shell.runs.run_routine(self.run.routine)
 
-    def append(self, line: str) -> None:
+    def append(self, lines: list[str]) -> None:
+        """The lines that came since the last batch, in one go."""
         bar = self.text.verticalScrollBar()
         at_end = bar.value() >= bar.maximum() - 4
-        self.text.appendPlainText(line)
+        self.text.appendPlainText("\n".join(lines[-OUTPUT_LINES:]))
         if at_end:
             bar.setValue(bar.maximum())
 
@@ -235,15 +238,19 @@ class RoutineRuns:
     def _pump(self) -> None:
         changed = False
         for run in list(self.runs[:20]):
+            lines: list[str] = []
+            ended = False
             for kind, value in run.take():
                 if kind == "line":
-                    window = self._windows.get(id(run))
-                    if window is not None:
-                        window.append(value)
+                    lines.append(value)
                 else:
-                    self._finish(run, run.auto)
-                    changed = True
+                    ended = True
             window = self._windows.get(id(run))
+            if window is not None and lines:
+                window.append(lines)
+            if ended:
+                self._finish(run, run.auto)
+                changed = True
             if window is not None:
                 window.refresh()
         if changed:
@@ -676,7 +683,7 @@ class RoutinesPage(TabPage):
             else:
                 filt = _("Scripts") + " (*.py *.ps1 *.bat *.cmd *.sh *.exe *.lnk);;" + _("All files") + " (*.*)" if k == "script" else _("All files") + " (*.*)"
                 path, _f = QFileDialog.getOpenFileName(dlg, "", "", filt)
-            if path:
+            if path and shiboken6.isValid(dlg):  # the idle lock does not wait for a file dialog: the window may have locked under it
                 target.setText(os.path.normpath(path))
                 if not name.text().strip():
                     name.setText(os.path.splitext(os.path.basename(path))[0])
@@ -684,7 +691,7 @@ class RoutinesPage(TabPage):
 
         def pick_cwd() -> None:
             folder = QFileDialog.getExistingDirectory(dlg)
-            if folder:
+            if folder and shiboken6.isValid(dlg):  # the idle lock does not wait for a file dialog: the window may have locked under it
                 cwd.setText(folder)
 
         browse.clicked.connect(do_browse)

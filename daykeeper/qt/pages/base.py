@@ -57,6 +57,10 @@ class TabPage(QWidget):
     def cancel_jobs(self) -> None:
         """The page is going away: timers and background answers must not reach it."""
 
+    def flush_edits(self) -> None:
+        """Typing that lives only in the page (not yet in the vault) goes into the vault now:
+        called before a save that ends the page — lock, close, language switch."""
+
     # ---- building blocks
 
     def split(self, sidebar_width: int = 300, minimum: int = 240) -> tuple[QSplitter, QFrame, QVBoxLayout, QFrame]:

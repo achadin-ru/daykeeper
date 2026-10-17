@@ -871,4 +871,5 @@ RU: dict[str, str] = {
     'Quit': 'Выйти',
     'Window': 'Окно',
     'Minimize': 'Свернуть',
+    'The start with the system belongs to the main Daykeeper build for now: change it there.': 'Запуск вместе с системой пока принадлежит основной сборке Daykeeper: меняйте его там.',
 }

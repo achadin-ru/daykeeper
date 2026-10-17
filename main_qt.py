@@ -37,6 +37,13 @@ def main() -> int:
     theme.apply(app, theme.theme_named(theme_for(argv)))
     window = MainWindow(Path(args[0]) if args else None, preview="--preview" in argv)
     install_excepthook(window)
+    # logging off or shutting down: Windows asks every program before the windows go (Qt's
+    # commitData); what is typed is saved then, whether or not a close event follows
+    def save_for_logoff(_manager) -> None:
+        window.flush_edits()
+        window.save_now()
+
+    app.commitDataRequest.connect(save_for_logoff)
     window.show_as_saved(minimized=autostart.MINIMIZED in argv)
     # refresh_autostart is not called while the Qt build lives next to the Tk one: the
     # entry of the Tk build would start the Qt build from then on. It is turned on with the

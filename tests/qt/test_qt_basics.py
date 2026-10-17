@@ -511,6 +511,28 @@ class DialogTest(unittest.TestCase):
         self.assertEqual(code.text(), "")
 
 
+class DialogGrowsTest(unittest.TestCase):
+    def test_a_long_error_set_later_is_not_cut(self):
+        """The dialog's width is fixed at first show; a two-line error (Russian texts) set
+        afterwards makes it taller instead of being cut."""
+        from PySide6.QtWidgets import QLabel, QPushButton
+
+        owner = QWidget()
+        owner.resize(800, 600)
+        owner.show()
+        dlg = ask_secret(owner, "t", "Code", "Go", lambda c: "Слишком много неверных попыток: приложение заблокировано, подождите и попробуйте снова", lambda: None)
+        pump()
+        type_text(dlg.findChild(SecretEdit), "1")
+        next(b for b in dlg.findChildren(QPushButton) if b.text() == "Go").click()
+        pump(30)
+        err = next(lab for lab in dlg.findChildren(QLabel) if lab.property("role") == "error")
+        self.assertGreater(err.heightForWidth(err.width()), err.fontMetrics().height() * 1.5, "the text does take more than one line")
+        self.assertGreaterEqual(err.height(), err.heightForWidth(err.width()))
+        dlg.close()
+        owner.close()
+        pump()
+
+
 class ToastTest(unittest.TestCase):
     def tearDown(self):
         for t in list(Toast.stack):

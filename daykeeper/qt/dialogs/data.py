@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import shiboken6
 from PySide6.QtWidgets import QButtonGroup, QFileDialog, QHBoxLayout, QLabel, QPlainTextEdit, QRadioButton, QVBoxLayout, QWidget
 
 from ...envimport import apply_plan, describe_plan, own_rules, parse_env, plan_import
@@ -33,7 +34,7 @@ def import_env_dialog(shell: Any, source: str | None = None) -> Dialog | None:
     shell.save_now()
     if source is None:
         source, _f = QFileDialog.getOpenFileName(shell, _("File with variables (KEY=VALUE)"), "", _("Variable files") + " (*.env .env* *.txt *.properties);;" + _("All files") + " (*.*)")
-    if not source:
+    if not source or shell.vault is None:  # the idle lock does not wait for a file dialog: the window may have locked under it
         return None
     try:
         text = Path(source).read_text(encoding="utf-8-sig")
@@ -125,7 +126,7 @@ def export_dialog(shell: Any, target: str | None = None) -> Dialog | None:
             stamp = time.strftime("%Y-%m-%d")
             filters = {"txt": _("Text") + " (*.txt)", "csv": "CSV (*.csv)", "json": "JSON (*.json)"}
             path, _f = QFileDialog.getSaveFileName(dlg, _("Where to save the export"), f"daykeeper-{stamp}.{fmt}", filters[fmt])
-        if not path:
+        if not path or not shiboken6.isValid(dlg) or shell.vault is None:  # locked under the file dialog
             return
         try:
             if fmt == "json":
@@ -159,7 +160,7 @@ def import_all_dialog(shell: Any, source: str | None = None) -> Dialog | None:
     shell.save_now()
     if source is None:
         source, _f = QFileDialog.getOpenFileName(shell, _("A Daykeeper export (.json)"), "", "JSON (*.json);;" + _("All files") + " (*.*)")
-    if not source:
+    if not source or shell.vault is None:  # locked under the file dialog
         return None
     dlg = Dialog(shell, _("Import everything"))
     dlg.box.addWidget(_heading(_("Replace everything in this vault with the file?"), dlg), 0, 0, 1, 2)

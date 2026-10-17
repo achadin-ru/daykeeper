@@ -13,6 +13,7 @@ from functools import partial
 from types import SimpleNamespace
 from typing import Any
 
+import shiboken6
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QButtonGroup, QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QRadioButton, QVBoxLayout, QWidget
 
@@ -370,7 +371,7 @@ class ClaudeSection(QWidget):
 
         def add() -> None:
             folder = QFileDialog.getExistingDirectory(self.win)
-            if folder:
+            if folder and shiboken6.isValid(box):  # the idle lock does not wait for a file dialog: the window may have locked under it
                 text = box.toPlainText().rstrip("\n")
                 box.setPlainText((text + "\n" if text else "") + folder)
 

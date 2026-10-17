@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import QDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QWidget
 
 from ... import palette, win32
@@ -84,12 +84,23 @@ class Dialog(QDialog):
         super().showEvent(event)
         if not self._centred:  # once: a dialog the user moved stays where it was put
             self._centred = True
-            self.setFixedSize(self.sizeHint())
+            # the width is fixed, the height follows the content (see event)
+            self.setFixedWidth(self.sizeHint().width())
             parent = self.parentWidget()
             if parent is not None:
                 p = parent.window().frameGeometry()
                 self.move(p.x() + (p.width() - self.width()) // 2, p.y() + max(0, (p.height() - self.height()) // 3))
             paint_caption(self)
+
+    def event(self, event: QEvent) -> bool:
+        done = super().event(event)
+        if event.type() == QEvent.Type.LayoutRequest and self._centred:
+            # an error line set after the dialog opened may wrap onto more lines (Russian
+            # texts do): the dialog grows to show it instead of cutting it
+            need = self.box.totalHeightForWidth(self.width()) if self.box.hasHeightForWidth() else self.box.totalMinimumSize().height()
+            if need > self.height():
+                self.resize(self.width(), need)
+        return done
 
     def on_lock(self) -> None:
         """The window locks: nothing of the dialog's own to keep; `close` follows."""

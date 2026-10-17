@@ -71,7 +71,7 @@ class SettingsTest(unittest.TestCase):
     def test_tabs_hide_and_move(self):
         dlg = self.open("tabs")
         page = dlg.pages["tabs"]
-        boxes = [b for b in page.findChildren(QCheckBox) if b.isVisible() or True]
+        boxes = page.findChildren(QCheckBox)
         notes = next(b for b in boxes if "Notes" in b.text())
         notes.setChecked(False)
         pump()
@@ -145,6 +145,16 @@ class SettingsTest(unittest.TestCase):
         self.assertIsNot(self.win._settings_win, dlg)
         self.assertEqual(self.win._settings_win.windowTitle(), "Настройки")
 
+    def test_the_built_qt_window_leaves_the_start_with_the_system_alone(self):
+        """Until the switch (stage 11) the start with the system belongs to the Tk build: in a
+        built Qt window its check boxes are off and say so."""
+        import sys
+
+        with mock.patch.object(sys, "frozen", True, create=True):
+            dlg = self.open("general")
+        start = next(b for b in dlg.pages["general"].findChildren(QCheckBox) if "Daykeeper" in b.text())
+        self.assertFalse(start.isEnabled())
+
     def test_lock_closes_the_settings(self):
         dlg = self.open("general")
         self.win.lock()
@@ -215,14 +225,14 @@ class DataDialogsTest(unittest.TestCase):
 
     def test_settings_data_section_lists_copies(self):
         self.win.save_now()
-        self.win.vault.save(force=True)
+        self.win.session.save_conflict_copy()  # one copy for sure: the test must not pass on an empty list
         self.win.settings_dialog("data")
         pump()
         with mock.patch.object(self.win, "open_window") as opener:
             copies = self.win.session.copies()
-            if copies:
-                self.win._settings_win._open_copy(copies[0][0])
-                opener.assert_called_once()
+            self.assertTrue(copies)
+            self.win._settings_win._open_copy(copies[0][0])
+            opener.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -186,7 +186,7 @@ class VaultGuardTest(unittest.TestCase):
         self.assertFalse(page.content.isEnabled())
         self.assertEqual(page.model.rowCount(), 0, "the list is emptied")
         self.assertIsNone(page.current)
-        self.assertTrue(win.main_screen.lock_tab_btn.isVisible() or not win.isVisible())
+        self.assertFalse(win.main_screen.lock_tab_btn.isHidden(), "“Lock passwords” is on the bar while the tab has a guard")
         for _ in range(25):  # Tab round the whole window
             QTest.keyClick(QApplication.focusWidget() or win, Qt.Key.Key_Tab)
             focus = QApplication.focusWidget()

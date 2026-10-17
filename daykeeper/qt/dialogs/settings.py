@@ -11,6 +11,7 @@ the locks off."""
 
 from __future__ import annotations
 
+import sys
 import shutil
 import tempfile
 import time
@@ -303,6 +304,14 @@ class SettingsWindow(QDialog):
         minimized.toggled.connect(apply_start)
         g.addWidget(start)
         g.addWidget(minimized)
+        if getattr(sys, "frozen", False):
+            # the built Qt window lives next to the Tk one until the switch (port plan, stage
+            # 11): a toggle here would point the start with the system at this build
+            start.setEnabled(False)
+            minimized.setEnabled(False)
+            note = label(_("The start with the system belongs to the main Daykeeper build for now: change it there."), "muted", s.inner)
+            note.setWordWrap(True)
+            g.addWidget(note)
 
         g = s.group(_("Bookmarks"))
         icons = QCheckBox(_("Load site icons and colours"), s.inner)

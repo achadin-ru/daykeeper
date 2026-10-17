@@ -1,7 +1,8 @@
 name: test
 
 # Every push and pull request (Dependabot's included): lint, types, the dependency audit
-# and the tests on Linux (under Xvfb, so the window tests run too) and Windows. The
+# and the tests on Linux (under Xvfb, so the Tk window tests run too) and Windows (where the
+# Qt window tests run as well: PySide6 is installed there). The
 # release build lives in build.yml. Actions are pinned to commit hashes, as there.
 
 on:
