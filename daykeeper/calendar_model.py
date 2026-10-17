@@ -13,8 +13,11 @@ An .ics file is only read as text: nothing in it is fetched, opened or run. What
 
 - DTSTART with a date — an all-day event; with a time — the wall time as written, with or
   without TZID (the zone is not converted); a time in UTC (…Z) — converted to local time.
+  So a DTSTART with TZID is taken as local wall time: a meeting set in another time zone
+  shows at the hour written in the file, which is the wrong local hour.
 - DTEND — the end time of the same day; SUMMARY, DESCRIPTION, URL (http(s) only), UID; a
-  VALARM with a TRIGGER before the start — the reminder minutes.
+  VALARM with a TRIGGER before the start — the reminder minutes, at most a week
+  (`MAX_REMIND_MIN`; a longer one is cut to a week).
 - RRULE FREQ=WEEKLY (INTERVAL 1) with or without BYDAY — one weekly event per weekday:
   the model has no "several weekdays" repeat, so «MO,WE» becomes two events with the UIDs
   «<uid>#MO» and «<uid>#WE». FREQ=DAILY (INTERVAL 1) is the same with all seven days (or
@@ -24,6 +27,8 @@ An .ics file is only read as text: nothing in it is fetched, opened or run. What
   for any other rule (INTERVAL > 1, BYMONTHDAY, BYSETPOS…), the event is imported once, on
   its DTSTART. EXDATE is ignored. A VEVENT with RECURRENCE-ID (a moved occurrence) is
   imported as a single event with the UID «<uid>#<recurrence-id>».
+- An event whose dates cannot be computed (a crafted file near the year 9999) is
+  skipped; the other events of the file are read.
 - Importing the same UID again updates the events of that UID (`upsert_ics`) instead of
   adding copies; the event keeps its id and the date its reminder was last shown.
 """
@@ -39,6 +44,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from typing import TYPE_CHECKING, Protocol
 
 from .gitlab import web_url
+from .journal_layout import current as current_layout
 from .settings import number
 
 if TYPE_CHECKING:
@@ -56,6 +62,7 @@ UID_PART = "#"  # «<uid>#MO»: one of the events an .ics event became
 ICS_DAYS = ("MO", "TU", "WE", "TH", "FR", "SA", "SU")  # index = date.weekday()
 MAX_ICS_EVENTS = 5000  # a file bigger than any real calendar export is cut, not read for minutes
 MAX_COUNT = 1000  # RRULE COUNT beyond this is treated as no end
+MAX_REMIND_MIN = 7 * 24 * 60  # a reminder at most a week ahead; a longer one is cut to this
 
 
 Date = date  # for the methods of CalEvent, whose field `date` hides the type
@@ -84,6 +91,12 @@ def _clean_time(value) -> str:
     if re.fullmatch(r"\d:[0-5]\d", text):  # «9:30» typed without the leading zero
         text = "0" + text
     return text if TIME_RE.fullmatch(text) else ""
+
+
+def _clean_remind(value) -> int:
+    """Reminder minutes in 0…MAX_REMIND_MIN: a stored or imported value cannot push the
+    reminder start out of the range of dates."""
+    return min(MAX_REMIND_MIN, max(0, number(int, value, 0)))
 
 
 def _month_day(year: int, month: int, day: int) -> date:
@@ -155,7 +168,7 @@ class CalEvent:
             time=_clean_time(d.get("time")),
             repeat=repeat if repeat in REPEATS else "",
             until=_clean_date(d.get("until")),
-            remind_min=max(0, number(int, d.get("remind_min"), 0)),
+            remind_min=_clean_remind(d.get("remind_min")),
             url=str(d.get("url") or ""),
             note=str(d.get("note") or ""),
             uid=str(d.get("uid") or ""),
@@ -232,22 +245,32 @@ class Calendar:
     def due(self, now: datetime) -> list[CalEvent]:
         """The reminders to show now: an occurrence whose start is less than `remind_min`
         minutes away and has not begun. Each is marked (`notified` = the date of the
-        occurrence), so it is shown once; the caller saves the vault."""
+        occurrence), so it is shown once; the caller saves the vault. An event whose times
+        cannot be computed is skipped: the others still fire."""
         found: list[CalEvent] = []
         for e in self.events:
-            if not e.time or e.remind_min <= 0:
-                continue
-            ahead = e.remind_min // (24 * 60) + 1  # a reminder may begin a day or more before
-            for offset in range(ahead + 1):
-                day = now.date() + timedelta(days=offset)
-                start = e.starts_at(day)
-                if start is None or not e.occurs_on(day) or e.notified == day.isoformat():
-                    continue
-                if start - timedelta(minutes=e.remind_min) <= now < start:
-                    e.notified = day.isoformat()
+            try:
+                if self._is_due(e, now):
                     found.append(e)
-                    break
+            except (ValueError, OverflowError, TypeError):
+                continue
         return sorted(found, key=_sort_key)
+
+    @staticmethod
+    def _is_due(e: CalEvent, now: datetime) -> bool:
+        if not e.time or e.remind_min <= 0:
+            return False
+        minutes = min(e.remind_min, MAX_REMIND_MIN)  # an event added in code is not cleaned by from_dict
+        ahead = minutes // (24 * 60) + 1  # a reminder may begin a day or more before
+        for offset in range(ahead + 1):
+            day = now.date() + timedelta(days=offset)
+            start = e.starts_at(day)
+            if start is None or not e.occurs_on(day) or e.notified == day.isoformat():
+                continue
+            if start - timedelta(minutes=minutes) <= now < start:
+                e.notified = day.isoformat()
+                return True
+        return False
 
     def to_list(self) -> list[dict]:
         return [e.to_dict() for e in self.events]
@@ -282,7 +305,7 @@ class VaultParts(Protocol):
 @dataclass
 class DayCell:
     date: str
-    journal: int = 0  # items of the journal day (columns and activities)
+    journal: int = 0  # items of the journal day: visible columns and activities of visible kinds
     notes_open: int = 0  # undone checklist items of the day's notes
     notes_total: int = 0
     routines: list[str] = field(default_factory=list)  # «09:30 Name» of routines that run at a time that weekday
@@ -311,6 +334,7 @@ def month_cells(year: int, month: int, vault: VaultParts, expiries: Iterable[Exp
     by_day: dict[str, list[str]] = {}
     for x in expiries:
         by_day.setdefault(_expiry_day(getattr(x, "when", None)), []).append(str(getattr(x, "entry_name", "")))
+    shown = {k.id for k in current_layout().visible_kinds()}  # as the daily report counts: hidden kinds are not
     feed = Counter(datetime.fromtimestamp(e.ts).date().isoformat() for e in vault.integrations.feed)
     timed = []
     for r in vault.routines.ordered():
@@ -328,7 +352,7 @@ def month_cells(year: int, month: int, vault: VaultParts, expiries: Iterable[Exp
             done, total = vault.notes.day_progress(key)
             row.append(DayCell(
                 date=key,
-                journal=(jday.total + len(jday.activities)) if jday is not None else 0,
+                journal=(jday.total + sum(1 for a in jday.activities if a.get("kind") in shown)) if jday is not None else 0,
                 notes_open=total - done,
                 notes_total=total,
                 routines=[f"{at} {r.name}".rstrip() for at, r in timed if wd in r.schedule.days],
@@ -401,12 +425,13 @@ def _ics_moment(value: str, params: dict[str, str]) -> tuple[date, time | None, 
 
 
 def _trigger_minutes(value: str) -> int:
-    """«-PT15M», «-PT1H», «-P1D», «-P1DT2H» before the start → minutes; anything else — 0."""
+    """«-PT15M», «-PT1H», «-P1D», «-P1DT2H» before the start → minutes, at most
+    MAX_REMIND_MIN; anything else — 0."""
     m = re.fullmatch(r"-P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?", value.strip().upper())
     if not m:
         return 0
     w, d, h, mi = (int(g or 0) for g in m.groups()[:4])
-    return ((w * 7 + d) * 24 + h) * 60 + mi
+    return min(MAX_REMIND_MIN, ((w * 7 + d) * 24 + h) * 60 + mi)
 
 
 def _rule(value: str) -> dict[str, str]:
@@ -522,7 +547,8 @@ def _event_from(props: list[tuple[str, dict[str, str], str]], alarm: int) -> lis
 
 def read_ics(text: str) -> list[CalEvent]:
     """The events of an .ics file (see the module docstring for what is mapped). Broken
-    events are skipped; nothing in the file is fetched or run."""
+    events are skipped (also one whose dates fall out of range: a crafted file near the
+    year 9999); nothing in the file is fetched or run."""
     events: list[CalEvent] = []
     props: list[tuple[str, dict[str, str], str]] | None = None
     depth = 0  # components nested inside the VEVENT (VALARM)
@@ -546,7 +572,10 @@ def read_ics(text: str) -> list[CalEvent]:
             if kind == "VALARM" and alarm_trigger and not alarm:
                 alarm = alarm_trigger
         elif name == "END" and kind == "VEVENT":
-            events += _event_from(props, alarm)
+            try:
+                events += _event_from(props, alarm)
+            except (ValueError, OverflowError):
+                pass  # a date pushed past the year 9999: this event is skipped, the rest read
             props = None
             if len(events) >= MAX_ICS_EVENTS:
                 break

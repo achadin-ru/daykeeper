@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from daykeeper.calendar_model import Calendar, month_cells, read_ics
+from daykeeper import journal_layout as jl
+from daykeeper.calendar_model import MAX_REMIND_MIN, CalEvent, Calendar, month_cells, read_ics
 from daykeeper.gitlab import Event
 from daykeeper.routines import Schedule
 from daykeeper.vault import Vault
@@ -86,6 +87,23 @@ class DueTest(unittest.TestCase):
         e = cal.add("Early call", "2027-01-01", time="00:10", remind_min=30)
         self.assertEqual(cal.due(datetime(2026, 12, 31, 23, 45)), [e])
         self.assertEqual(e.notified, "2027-01-01")
+
+    def test_huge_minutes_do_not_break_the_other_reminders(self):
+        cal = Calendar()
+        cal.add("Crafted", "2026-10-19", time="11:00", remind_min=99999999 * 24 * 60)
+        broken = cal.add("Broken time", "2026-10-19", time="99:99", remind_min=5)
+        ok = cal.add("Standup", "2026-10-19", time="11:00", remind_min=5)
+        found = cal.due(datetime(2026, 10, 19, 10, 56))
+        self.assertIn(ok, found)
+        self.assertNotIn(broken, found)
+
+    def test_minutes_cut_to_a_week(self):
+        e = CalEvent.from_dict({"date": "2026-10-19", "time": "11:00", "remind_min": 10**12})
+        assert e is not None
+        self.assertEqual(e.remind_min, MAX_REMIND_MIN)
+        cal = Calendar([e])
+        self.assertEqual(cal.due(datetime(2026, 10, 12, 10, 59)), [], "more than a week ahead")
+        self.assertEqual(cal.due(datetime(2026, 10, 12, 11, 1)), [e])
 
 
 class StorageTest(unittest.TestCase):
@@ -211,6 +229,24 @@ class IcsTest(unittest.TestCase):
         updated = next(e for e in cal.events if e.uid.startswith("s"))
         self.assertEqual((updated.id, updated.title, updated.time, updated.notified, updated.remind_min), (monday.id, "Standup (moved)", "10:00", "2026-10-19", 5))
 
+    def test_huge_trigger_is_cut_to_a_week_and_fires_with_the_others(self):
+        crafted, ok = read_ics(ics(
+            "UID:c\r\nDTSTART:20261020T110000\r\nSUMMARY:Crafted\r\nBEGIN:VALARM\r\nTRIGGER:-P99999999D\r\nEND:VALARM",
+            "UID:o\r\nDTSTART:20261020T110000\r\nSUMMARY:Ok\r\nBEGIN:VALARM\r\nTRIGGER:-PT10M\r\nEND:VALARM",
+        ))
+        self.assertEqual((crafted.remind_min, ok.remind_min), (MAX_REMIND_MIN, 10))
+        cal = Calendar.from_list([crafted.to_dict(), ok.to_dict()])
+        self.assertEqual([e.title for e in cal.due(datetime(2026, 10, 20, 10, 55))], ["Crafted", "Ok"])
+
+    def test_dates_near_the_year_9999_skip_only_that_event(self):
+        events = read_ics(ics(
+            "UID:y\r\nDTSTART;VALUE=DATE:99900101\r\nSUMMARY:Yearly\r\nRRULE:FREQ=YEARLY;COUNT=20",
+            "UID:m\r\nDTSTART;VALUE=DATE:99991115\r\nSUMMARY:Monthly\r\nRRULE:FREQ=MONTHLY;COUNT=5",
+            "UID:w\r\nDTSTART;VALUE=DATE:99991230\r\nSUMMARY:Weekly\r\nRRULE:FREQ=WEEKLY;BYDAY=MO,TH",
+            "UID:k\r\nDTSTART:20261020T110000\r\nSUMMARY:Kept",
+        ))
+        self.assertEqual([e.title for e in events], ["Kept"])
+
     def test_recurrence_override_is_its_own_event(self):
         events = read_ics(ics(
             "UID:r\r\nDTSTART:20261019T093000\r\nSUMMARY:Standup\r\nRRULE:FREQ=WEEKLY",
@@ -279,6 +315,21 @@ class MonthCellsTest(unittest.TestCase):
         self.assertEqual((thu.journal, thu.notes_total, thu.routines, thu.events, thu.feed), (0, 0, [], [], 1))
         self.assertEqual(cells["2026-10-21"].routines, ["09:05 Backup"])
         self.assertEqual(rows[0][0].date, "2026-09-28")
+
+    def test_hidden_kind_not_counted(self):
+        layout = jl.preset("qa")
+        kind = layout.kind("manual")
+        assert kind is not None
+        kind.hidden = True
+        jl.configure(layout)
+        self.addCleanup(jl.configure, jl.preset("qa"))
+        vault = Vault.create(Path(self.tmp.name) / "v.pkv", "master-pass-1")
+        day = vault.journal.get("2026-10-14", create=True)
+        assert day is not None
+        day.add("ok", "APP-1")
+        day.activities += [{"kind": "manual", "text": "APP-2"}, {"kind": "review", "text": "!5"}]
+        cells = {c.date: c for r in month_cells(2026, 10, vault, [], "2026-10-18", Calendar()) for c in r}
+        self.assertEqual(cells["2026-10-14"].journal, 2, "the column item and the review; the hidden manual case is not counted")
 
     def test_calendar_taken_from_the_vault_when_present(self):
         vault = Vault.create(Path(self.tmp.name) / "v.pkv", "master-pass-1")
