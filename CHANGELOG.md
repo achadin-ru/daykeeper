@@ -1,12 +1,14 @@
 # Changes
 
-## 1.1.2-beta.1 — pre-release: the fixes of the audit of 16 October 2026
+## 1.1.2-beta.2 — pre-release: the fixes of the audit of 16 October 2026 and the Notes tab speed-up
 
 > **Pre-release, still in development.** Covered by the automated tests and a scripted
 > run of every screen, but not yet used day to day. Keep a copy of the vault
 > (Settings → Data) before trying it; 1.1.1 stays the latest stable release.
 
-Every finding of the October 2026 code audit, each with a test and a probe.
+Every finding of the October 2026 code audit, each with a test and a probe, and the
+Notes tab drawn on a canvas. beta.1 (16 October) carried everything below but the
+**Speed** part and the folder build.
 
 **Look**
 - The restart after a theme switch failed in the one-file Windows build: the new copy
