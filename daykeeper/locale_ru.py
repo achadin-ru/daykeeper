@@ -971,7 +971,6 @@ RU: dict[str, str] = {
     'Fix the review notes': 'Правки по ревью',
     'A note as a task': 'Заметка как задание',
     'Brief a merge request': 'Кратко об MR',
-    'Digest of a call': 'Конспект созвона',
     'The folder has characters the console cannot pass: {path}': 'В пути есть символы, которые консоль не передаст: {path}',
     'Could not start {program}: {error}': 'Не удалось запустить {program}: {error}',
     'Stopped': 'Остановлено',

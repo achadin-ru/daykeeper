@@ -37,6 +37,7 @@ from datetime import date
 from pathlib import Path
 
 from .i18n import _
+from .runner import cmd_quote
 from .settings import private
 
 KINDS = ("mr_review", "mr_fix", "note_task", "mr_brief", "custom")
@@ -497,11 +498,9 @@ def terminal_plan(a: Assignment, path: Path | str, agent: str = "", platform: st
         lines += [f'set "{name}="' for name in off]
         lines += [_batch_cd(folder), _batch_text(subprocess.list2cmdline([agent, line]))]
         # The full path, not the bare name: with NoDefaultCurrentDirectoryInExePath set cmd
-        # does not look in the current folder. No quotes of our own — open_in_console passes
-        # the line through list2cmdline, which adds them when the path has a space and would
-        # turn ours into `\"` that cmd does not read back.
+        # does not look in the current folder; quoted as runner.console_command passes it.
         return ConsolePlan(
-            shell=str(script_path), cwd=str(script_path.parent),
+            shell=cmd_quote(str(script_path)), cwd=str(script_path.parent),
             script="\r\n".join(lines) + "\r\n", script_path=str(script_path),
         )
     argv = [agent, line]

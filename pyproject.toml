@@ -73,6 +73,10 @@ files = [
     "daykeeper/quick.py",
     "daykeeper/hotkey.py",
     "daykeeper/cliphistory.py",
+    "daykeeper/assistants.py",
+    "daykeeper/assistant_runs.py",
+    "daykeeper/mr_preview.py",
+    "daykeeper/calls.py",
 ]
 ignore_missing_imports = true
 warn_unused_ignores = true

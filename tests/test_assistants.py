@@ -16,6 +16,7 @@ from unittest import mock
 
 from daykeeper import assistants as ai
 from daykeeper.locale_ru import RU
+from daykeeper.runner import cmd_quote
 
 SECRET_TEXT = "Line one of the task\nwith a \"quote\" & an ampersand"
 
@@ -217,7 +218,7 @@ class CommandsTest(unittest.TestCase):
         env = {"anthropic_api_key": "k", "PATH": "x", "OPENAI_API_KEY": "k2"}
         plan = ai.terminal_plan(a, self.PATH, "claude", platform="win32", environ=env, exists=lambda p: True)
         self.assertEqual(plan.problem, "")
-        self.assertEqual(plan.shell, str(self.PATH.with_suffix(".cmd")))  # the full path, not the bare name
+        self.assertEqual(plan.shell, cmd_quote(str(self.PATH.with_suffix(".cmd"))))  # the full path, not the bare name
         self.assertEqual(Path(plan.cwd), self.PATH.parent)
         self.assertEqual(Path(plan.script_path), self.PATH.with_suffix(".cmd"))
         lines = plan.script.split("\r\n")
@@ -373,8 +374,11 @@ class WindowsLauncherRunTest(unittest.TestCase):
         self.path = ai.assignment_file(self.root / "data dir", self.a)
 
     def run_launcher(self, plan: ai.ConsolePlan) -> subprocess.CompletedProcess:
+        from daykeeper.runner import console_command
+
+        line = console_command(plan).replace("cmd /S /K ", f'"{self.cmd}" /S /C ', 1)  # as open_in_console starts it, no window left open
         return subprocess.run(  # noqa: S603 — cmd on a launcher this test wrote
-            [self.cmd, "/c", plan.shell], cwd=plan.cwd, env=self.env, stdin=subprocess.DEVNULL,
+            line, cwd=plan.cwd, env=self.env, stdin=subprocess.DEVNULL,
             capture_output=True, timeout=60, creationflags=0x08000000,  # CREATE_NO_WINDOW
         )
 
