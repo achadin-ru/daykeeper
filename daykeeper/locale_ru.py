@@ -905,4 +905,17 @@ RU: dict[str, str] = {
     'Tested on {?env}, {date:%d.%m.%Y}.\nResult: {?result}\n{key_url}': 'Проверено на {?env}, {date:%d.%m.%Y}.\nРезультат: {?result}\n{key_url}',
     'Found while checking {key_url}\n\nSteps to reproduce:\n1. \n\nExpected result:\n\nActual result:\n\nEnvironment: {?env}': 'Найдено при проверке {key_url}\n\nШаги воспроизведения:\n1. \n\nОжидаемый результат:\n\nФактический результат:\n\nСтенд: {?env}',
     '## What\n{?summary}\n\n## Why\n{key_url}\n\n## How to check\n': '## Что\n{?summary}\n\n## Зачем\n{key_url}\n\n## Как проверить\n',
+    # importers.py
+    'Unknown export format': 'Неизвестный формат выгрузки',
+    'The file is not UTF-8 text': 'Файл — не текст в UTF-8',
+    'The file declares a DOCTYPE: refused for safety': 'В файле есть объявление DOCTYPE: отказ ради безопасности',
+    'Not a KeePass XML export': 'Это не XML-выгрузка KeePass',
+    'Not a Bitwarden export': 'Это не выгрузка Bitwarden',
+    'The export is encrypted: export the vault again as plain .json': 'Выгрузка зашифрована: выгрузите хранилище заново как обычный .json',
+    'Damaged CSV file': 'Повреждённый CSV-файл',
+    'Damaged XML file': 'Повреждённый XML-файл',
+    'Damaged JSON file': 'Повреждённый JSON-файл',
+    'The file is larger than {n} MB': 'Файл больше {n} МБ',
+    'lists: +{n}': 'списков: +{n}',
+    'skipped {n}': 'пропущено {n}',
 }
