@@ -128,7 +128,7 @@ jobs:
         # a separate artifact next to the Tk bundle, not part of a release (the port plan)
         run: |
           python -m PyInstaller --noconfirm --clean --distpath dist --workpath build/Daykeeper-qt packaging/daykeeper-qt.spec
-          python packaging/check_size.py "dist/Daykeeper Qt.app" 110
+          python packaging/check_size.py "dist/Daykeeper Qt.app" 90  # 78 MB measured on macOS 26 arm64
           codesign --force --deep --sign - "dist/Daykeeper Qt.app"
           ditto -c -k --sequesterRsrc --keepParent "dist/Daykeeper Qt.app" dist/Daykeeper-qt-macos.zip
 

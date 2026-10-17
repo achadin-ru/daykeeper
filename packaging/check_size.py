@@ -8,7 +8,9 @@ from pathlib import Path
 
 
 def size_mb(folder: Path) -> float:
-    return sum(p.stat().st_size for p in folder.rglob("*") if p.is_file()) / 1024 / 1024
+    """What the folder takes on disk: a symbolic link is not followed (a macOS bundle links
+    every Qt framework from two places, and following them counted 183 MB for 78)."""
+    return sum(p.lstat().st_size for p in folder.rglob("*") if p.is_file() and not p.is_symlink()) / 1024 / 1024
 
 
 def main(argv: list[str]) -> int:

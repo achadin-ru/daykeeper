@@ -16,7 +16,6 @@ def main() -> int:
     import threading
     from pathlib import Path
 
-    import PySide6
     from PySide6.QtCore import QCoreApplication
     from PySide6.QtWidgets import QApplication
 
@@ -24,7 +23,7 @@ def main() -> int:
     from daykeeper.boot import theme_for
     from daykeeper.session import remove_preview_copy
 
-    QCoreApplication.setLibraryPaths([str(Path(PySide6.__file__).resolve().parent / "plugins")])
+    QCoreApplication.setLibraryPaths([plugin_folder()])
     app = QApplication(sys.argv[:1])
 
     from daykeeper.qt import theme
@@ -50,6 +49,19 @@ def main() -> int:
     if any(t.is_alive() and not t.daemon for t in threading.enumerate() if t is not threading.main_thread()):
         os._exit(code)
     return code
+
+
+def plugin_folder() -> str:
+    """Qt's plugins inside PySide6, as Qt's own qt.conf there says: PySide6/plugins on
+    Windows, PySide6/Qt/plugins on macOS and Linux (a fixed "plugins" left macOS without
+    its platform plugin, and the window could not start there)."""
+    from pathlib import Path
+
+    import PySide6
+    from PySide6.QtCore import QLibraryInfo
+
+    folder = QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath)
+    return folder if Path(folder).is_dir() else str(Path(PySide6.__file__).resolve().parent / "plugins")
 
 
 def refresh_autostart(vault_path) -> None:

@@ -1019,18 +1019,27 @@ class NotesPage(TabPage):
         self.place_cards()
         self.area.verticalScrollBar().setValue(top if keep_scroll else 0)
 
-    def avail_width(self) -> int:
-        """The width the cards are laid out in: always as if the scroll bar were there.
-        Taken with and without it, the bar's own 10 px could flip two columns into one
-        and back — taller cards bring the bar, the bar narrows the row, one column is
-        taller still… — and the layout never settled (a stack overflow at 150 % text)."""
+    def avail_width(self, bar: bool = False) -> int:
+        """The width the cards are laid out in, taken from the scroll area's own size (which
+        the scroll bar does not change): without the bar, or with room left for it. Read
+        from the row itself, the bar's own width could flip two columns into one and back —
+        taller cards bring the bar, the bar narrows the row, one column is taller still… —
+        and the layout never settled (a stack overflow at 150 % text)."""
         area = self.area
         content = area.widget()
         inner = content.layout() if content is not None else None
         m = inner.contentsMargins() if inner is not None else None
         sides = m.left() + m.right() if m is not None else 48
-        w = area.width() - 2 * area.frameWidth() - area.verticalScrollBar().sizeHint().width() - sides
+        w = area.width() - 2 * area.frameWidth() - sides - (area.verticalScrollBar().sizeHint().width() if bar else 0)
         return max(CARD_SMALLEST, w) if area.width() > 1 else CARD_MIN_WIDTH
+
+    def _room_height(self) -> int:
+        """The height the cards have under the title before the page must scroll."""
+        area = self.area
+        content = area.widget()
+        inner = content.layout() if content is not None else None
+        bottom = inner.contentsMargins().bottom() if inner is not None else 0
+        return area.height() - 2 * area.frameWidth() - self.flow.y() - bottom
 
     def card_width(self, note: Note, avail: int) -> int:
         cols, col = column_width(avail, CARD_GAP, CARD_MIN_WIDTH)
@@ -1049,15 +1058,22 @@ class NotesPage(TabPage):
             self.flow.setFixedHeight(1)
             return
         self.empty.hide()
-        avail = self.avail_width()
         cards = [(n, self.cards[n.id]) for n in shown if n.id in self.cards]
-        sizes = []
-        for note, card in cards:
-            w = self.card_width(note, avail)
-            card.set_width(w)
-            h = max(note.height, card.min_h) if note.height else card.natural_h
-            sizes.append((w, h))
-        spots, total = flow_layout(sizes, avail, CARD_GAP)
+
+        def plan(avail: int) -> tuple[list[tuple[int, int]], list, int]:
+            sizes = []
+            for note, card in cards:
+                w = self.card_width(note, avail)
+                card.set_width(w)
+                sizes.append((w, max(note.height, card.min_h) if note.height else card.natural_h))
+            spots, total = flow_layout(sizes, avail, CARD_GAP)
+            return sizes, spots, total
+
+        # the full width when everything fits, room for the scroll bar when it will not:
+        # decided by the area's size alone, so the bar coming and going changes nothing
+        sizes, spots, total = plan(self.avail_width())
+        if total + CARD_GAP > self._room_height():
+            sizes, spots, total = plan(self.avail_width(bar=True))
         for (_n, card), (w, h), (x, y) in zip(cards, sizes, spots, strict=True):
             if card.geometry() != QRect(x, y, w, h):
                 card.setGeometry(x, y, w, h)  # a new height of a dragged card relayouts in resizeEvent

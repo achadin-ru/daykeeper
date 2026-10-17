@@ -204,6 +204,20 @@ class JobsTest(unittest.TestCase):
         self.assertEqual(got, [])
 
 
+class PluginFolderTest(unittest.TestCase):
+    def test_the_platform_plugin_is_in_the_folder_main_qt_gives_qt(self):
+        """PySide6 keeps the plugins in PySide6/plugins on Windows, PySide6/Qt/plugins on
+        macOS and Linux; the folder main_qt sets must hold this system's platform plugin."""
+        import sys
+        from pathlib import Path
+
+        import main_qt
+
+        platforms = Path(main_qt.plugin_folder()) / "platforms"
+        want = {"win32": "qwindows", "darwin": "libqcocoa"}.get(sys.platform, "libqxcb")
+        self.assertTrue(any(p.name.startswith(want) for p in platforms.iterdir()), sorted(p.name for p in platforms.iterdir()))
+
+
 class TextScaleTest(unittest.TestCase):
     """Windows' "Text size" makes every font of the window bigger (Qt does not do it)."""
 

@@ -25,4 +25,11 @@ exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="Daykeeper", console=F
           icon=os.path.join(ROOT, "assets", "icon.icns" if MAC else "icon.ico"))
 coll = COLLECT(exe, a.binaries, a.datas, name="Daykeeper-qt", upx=False)
 if MAC:
-    app = BUNDLE(coll, name="Daykeeper Qt.app", icon=os.path.join(ROOT, "assets", "icon.icns"), bundle_identifier="ru.achadin.daykeeper.qt")
+    sys.path.insert(0, ROOT)
+    from daykeeper import __version__  # noqa: E402
+
+    version = __version__.split("-")[0]  # macOS takes digits and dots only: 1.1.2-beta.2 -> 1.1.2
+    # the version (PyInstaller writes 0.0.0) and the minimum system of the PySide6 wheel,
+    # as build.sh puts them into the Tk bundle
+    app = BUNDLE(coll, name="Daykeeper Qt.app", icon=os.path.join(ROOT, "assets", "icon.icns"), bundle_identifier="ru.achadin.daykeeper.qt",
+                 version=version, info_plist={"CFBundleVersion": version, "LSMinimumSystemVersion": "14.0", "NSHighResolutionCapable": True})
