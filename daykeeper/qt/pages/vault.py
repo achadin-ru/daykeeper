@@ -45,6 +45,7 @@ from ..widgets.common import divider, fill_menu, icon_button, more_button, popup
 from ..widgets.flow import flow_host
 from ..widgets.secret_edit import SecretEdit
 from .base import TabPage
+from ..errors import guard_events
 
 # Preset fields for the “+ Add field” button: (menu label key, field name key, secret?).
 FIELD_PRESETS: list[tuple[str, str, bool]] = [
@@ -149,6 +150,7 @@ class EntryDelegate(QStyledItemDelegate):
         return QSize(200, ROW_HEIGHT)
 
 
+@guard_events
 class FieldRow(QWidget):
     """One "name — value" line of the card: the name, the value, show, copy, generate,
     secret, delete. A secret value is put into the field only while it is revealed or
@@ -279,6 +281,7 @@ class FieldRow(QWidget):
         self.value.wipe()
 
 
+@guard_events
 class FieldsBox(QWidget):
     """The field rows; each goes to two lines when one line no longer fits the card."""
 
@@ -376,6 +379,7 @@ class GuardScreen(QWidget):
             self.error.setText(str(result))
 
 
+@guard_events
 class VaultPage(TabPage):
     """The Passwords tab. `current` is the entry on the card, `group` the list shown."""
 

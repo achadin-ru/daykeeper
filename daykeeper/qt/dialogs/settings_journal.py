@@ -15,6 +15,7 @@ from ... import journal_layout as jl
 from ...i18n import _
 from ..widgets.common import divider, icon_button
 from .base import ask_yes_no, button, label, show_error
+from ..errors import guard_events
 
 PHRASE_TIP = "A word for the first line of the report when there are items, e.g. tested tasks or code review. Empty — nothing."
 ROLE_TIP = "MR numbers — !42 and links on one line; test cases — one shared “New tests” line; a list — any items on one line; notes — each goes into line 1 as it is."
@@ -91,6 +92,7 @@ class ItemRow(QWidget):
                 self.item.id = self.item.command = jl.new_id(self.item.label, taken)
 
 
+@guard_events
 class ListBox(QWidget):
     """The rows of one list, two lines each when the section is narrow."""
 

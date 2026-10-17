@@ -32,6 +32,7 @@ from ..widgets.countlist import COUNT_ROLE, count_list
 from ..widgets.tiles import Item, TileBoard, TilePainter, elide, rounded
 from ..widgets.toast import Toast
 from .base import TabPage
+from ..errors import guard_events
 
 SCHEDULE_TICK_MS = 20_000
 PUMP_MS = 300
@@ -51,6 +52,7 @@ def kind_colour(r: Routine) -> str:
     return KIND_COLOURS.get(r.kind) or theme.current().LINK
 
 
+@guard_events
 class OutputWindow(QWidget):
     """The live log of one run with Stop / Run again / Close; closes on lock."""
 

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
 from ...layout import TILE_MARGIN, TILE_MIN_WIDTH, tile_columns
 from .. import theme
+from ..errors import guard_events
 
 GAP = 12  # px between tiles
 
@@ -59,6 +60,7 @@ def elide(fm: QFontMetrics, text: str, width: int) -> str:
     return fm.elidedText(text, Qt.TextElideMode.ElideRight, max(0, width))
 
 
+@guard_events
 class TileBoard(QWidget):
     """See the module text. `activate(data, zone)` and `menu(data, global_pos)` are the page's."""
 

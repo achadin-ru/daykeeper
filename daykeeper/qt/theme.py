@@ -317,3 +317,25 @@ def font(tk_size: float, bold: bool = False, mono: bool = False) -> QFont:
 def blend(a: str, b: str, t: float) -> str:
     """Colour `a` mixed into `b` by `t` (0 — all b, 1 — all a)."""
     return palette.mix(a, b, t)
+
+
+_translator = None
+
+
+def translate_qt(app: QApplication, language: str) -> None:
+    """The texts Qt itself draws (the menu of a text field, the buttons of the system dialogs,
+    the file dialog) in the UI language: Qt's own Russian catalogue for "ru", none for English.
+    Read from PySide6's own folder (inside the built app too), never from a user path."""
+    from PySide6.QtCore import QLibraryInfo, QTranslator
+
+    global _translator
+    if _translator is not None:
+        app.removeTranslator(_translator)
+        _translator = None
+    if language != "ru":
+        return
+    folder = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
+    translator = QTranslator(app)
+    if translator.load("qtbase_ru", folder):
+        app.installTranslator(translator)
+        _translator = translator

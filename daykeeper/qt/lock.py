@@ -18,6 +18,7 @@ from ..i18n import _
 from ..security import FAIR, GOOD, GUARD_PIN, STRONG, WEAK, Attempts, IdleClock, password_strength
 from .dialogs.base import ask_secret
 from .timers import Ticker
+from .errors import guard_events
 
 IDLE_CHECK_MS = 5_000
 MINIMIZE_LOCK_MS = 50  # the window must still be minimized after this
@@ -38,6 +39,7 @@ def strength_text(pw: str) -> str:
     }[password_strength(pw)]
 
 
+@guard_events
 class SecurityController(QObject):
     """Made once with the window, a child of it. `vault_locked` — the Passwords tab is
     behind its guard; `secrets_open()` is what every place that shows a secret asks first."""

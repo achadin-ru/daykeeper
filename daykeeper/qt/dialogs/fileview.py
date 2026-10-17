@@ -26,6 +26,7 @@ from ...markdown import Block, parse, table_lines, toggle_task
 from .. import theme
 from .base import ask_yes_no, button, label, paint_caption, register, show_error
 from ..widgets.common import divider, icon_button
+from ..errors import guard_events
 
 MD_SUFFIXES = {".md", ".markdown", ".mdown"}
 VIEWER_OPENS = MD_SUFFIXES | {".txt", ".log", ".csv", ".json", ".yaml", ".yml", ".xml", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg",
@@ -69,6 +70,7 @@ def read_text_file(path: Path) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
+@guard_events
 class FileViewer(QWidget):
     """One window per file; closed (and its edits kept) on lock."""
 

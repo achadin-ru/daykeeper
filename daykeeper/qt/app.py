@@ -39,6 +39,7 @@ from .lock import SecurityController
 from .timers import Debounce, Ticker
 from .unlock import UnlockScreen
 from .widgets.common import WheelGuard, icon_button
+from .errors import guard_events
 
 AUTOSAVE_DELAY_MS = 800
 UNDO_SETTLE_MS = 700  # changes this close together are one undo step
@@ -79,6 +80,7 @@ def page_types() -> dict[str, Any]:
     return {"vault": VaultPage, "journal": JournalPage, "notes": NotesPage, "bookmarks": BookmarksPage, "routines": RoutinesPage, "integrations": IntegrationsPage}
 
 
+@guard_events
 class MainScreen(QWidget):
     """The bar along the top (the logo, settings, lock the app, lock the passwords, undo,
     redo, the tab buttons), the page stack, the status line. Made once."""
@@ -207,6 +209,7 @@ class MainScreen(QWidget):
         self.status.setText("")
 
 
+@guard_events
 class MainWindow(QMainWindow):
     def __init__(self, vault_path: Path | None = None, preview: bool = False):
         super().__init__()
@@ -220,6 +223,9 @@ class MainWindow(QMainWindow):
         configure_links(self.session.links())
         configure_layout(Layout.from_settings(self.session.settings()))
         set_language(self.session.language())
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            theme.translate_qt(app, language())
 
         self.mode = "vault"
         self.pages: dict[str, Any] = {}  # the tabs, made on their first visit
@@ -487,6 +493,9 @@ class MainWindow(QMainWindow):
         self.save_now()
         self.session.write_settings({"language": code})
         set_language(code)
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            theme.translate_qt(app, code)
         self.main_screen.retranslate()
         section = getattr(self._settings_win, "section", None) if self._settings_win is not None and shiboken6.isValid(self._settings_win) else None
         self.close_settings()

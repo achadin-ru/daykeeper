@@ -246,6 +246,58 @@ class SecretEditTest(unittest.TestCase):
         self.assertEqual(e.echoMode(), QLineEdit.EchoMode.Password)
 
 
+CHILD = r"""
+import os, sys
+sys.path.insert(0, {root!r})
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QApplication, QPushButton
+from daykeeper.qt.errors import guard_events
+app = QApplication([])
+seen = []
+sys.excepthook = lambda t, e, tb: seen.append(t.__name__)
+class Plain(QPushButton):
+    def resizeEvent(self, ev):
+        raise ValueError("boom")
+Guarded = guard_events(type("Guarded", (Plain,), {{"resizeEvent": Plain.resizeEvent}}))
+w = ({cls})()
+w.show()
+def slot():
+    w.resize(40, 40)
+    print("slot went on", flush=True)
+QTimer.singleShot(0, slot)
+QTimer.singleShot(50, app.quit)
+app.exec()
+print("survived", seen, flush=True)
+"""
+
+
+class GuardEventsTest(unittest.TestCase):
+    """The reason for errors.guard_events, shown in a child process (it may end)."""
+
+    def run_child(self, cls: str) -> tuple[int, str]:
+        import os
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        code = CHILD.format(root=str(Path(__file__).resolve().parents[2]), cls=cls)
+        done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60, env=dict(os.environ))  # noqa: S603
+        return done.returncode, done.stdout
+
+    def test_a_guarded_handler_keeps_the_process_alive(self):
+        code, out = self.run_child("Guarded")
+        self.assertEqual(code, 0, out)
+        self.assertIn("slot went on", out)
+        self.assertIn("survived ['ValueError'", out, "the error reached the hook")
+
+    def test_an_unguarded_one_ends_it(self):
+        """If Qt for Python changes this, the guard may go: the test says so."""
+        code, out = self.run_child("Plain")
+        self.assertNotEqual(code, 0)
+        self.assertNotIn("survived", out)
+
+
 class Owner(QWidget):
     """Stands in for the main window: keeps what registers to close on lock."""
 

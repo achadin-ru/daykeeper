@@ -38,6 +38,9 @@ def main() -> int:
     window = MainWindow(Path(args[0]) if args else None, preview="--preview" in argv)
     install_excepthook(window)
     window.show_as_saved(minimized=autostart.MINIMIZED in argv)
+    # refresh_autostart is not called while the Qt build lives next to the Tk one: the
+    # entry of the Tk build would start the Qt build from then on. It is turned on with the
+    # switch to the Qt window (stage 11 of the port).
     code = app.exec()
     if "--preview" in argv:
         remove_preview_copy(window.vault_path)  # the duplicate made for the look goes with the window
@@ -46,6 +49,18 @@ def main() -> int:
     if any(t.is_alive() and not t.daemon for t in threading.enumerate() if t is not threading.main_thread()):
         os._exit(code)
     return code
+
+
+def refresh_autostart(vault_path) -> None:
+    """An autostart entry left by a copy of the app elsewhere now starts this one (as
+    app._refresh_autostart of the Tk window); see main() for why it waits."""
+    from daykeeper import autostart
+    from daykeeper.vault import default_vault_path
+
+    try:
+        autostart.refresh(autostart.launch_args(autostart.is_minimized(), vault_path, default_vault_path()))
+    except OSError:
+        pass
 
 
 if __name__ == "__main__":

@@ -17,12 +17,15 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QGuiApplication, QMouseEvent
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
 
+from ..errors import guard_events
+
 TOAST_MS = 8_000
 WIDTH = 360  # px, as in the Tk window
 EDGE = 24  # px from the right edge of the work area
 GAP = 8  # px between stacked cards
 
 
+@guard_events
 class Toast(QWidget):
     """A card with a title and a text; `url` or `action` makes it clickable."""
 

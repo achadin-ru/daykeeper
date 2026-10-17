@@ -32,6 +32,7 @@ from ..timers import IdleOnce
 from ..widgets.common import scroll_area, section
 from ..widgets.countlist import COUNT_ROLE, KEY_ROLE, add_count_item, count_list
 from .base import TabPage
+from ..errors import guard_events
 
 CARD_SMALLEST = 200  # the narrowest a card can be dragged
 UNFINISHED = "__unfinished__"  # a “day” on the left: everything unfinished across all days
@@ -63,6 +64,7 @@ def note_colours(note: Note) -> tuple[str, str]:
     return bg, accent
 
 
+@guard_events
 class ItemEdit(QPlainTextEdit):
     """One checklist item: wraps like the drawn text, but stays one line of text (Enter
     goes to the next field, a pasted line break becomes a space)."""
@@ -97,6 +99,7 @@ class ItemEdit(QPlainTextEdit):
         return super().event(event)
 
 
+@guard_events
 class NoteCard(QWidget):
     """One note as one painted widget. `relayout()` measures it from the note; `zones` is
     what is where (for the pointer and the keyboard); `edit(kind, payload)` puts a real
@@ -831,6 +834,7 @@ class NoteCard(QWidget):
         return self.editor if isinstance(self.editor, QPlainTextEdit) and self.editing == ("text", None) else None
 
 
+@guard_events
 class NotesPage(TabPage):
     """The Notes tab. `nday` is the day (or the list) on the left, None before the first visit."""
 

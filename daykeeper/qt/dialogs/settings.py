@@ -53,6 +53,7 @@ from ..lock import strength_text
 from ..widgets.common import divider, icon_button, scroll_area
 from ..widgets.secret_edit import SecretEdit
 from .base import ask_yes_no, button, label, paint_caption, register, show_error, show_info
+from ..errors import guard_events
 
 SETTINGS_SIZE = (1200, 760)
 COPIES_SHOWN = 12
@@ -150,6 +151,7 @@ class Section(QWidget):
         self.foot_box.addStretch(1)
 
 
+@guard_events
 class SettingsWindow(QDialog):
     """The settings window. `show_section(name)` opens a section."""
 

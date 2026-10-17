@@ -11,6 +11,8 @@ from PySide6.QtCore import QEvent, QObject, QPoint, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QComboBox, QFrame, QLabel, QMenu, QScrollArea, QToolButton, QVBoxLayout, QWidget
 
+from ..errors import guard_events
+
 MenuItems = Iterable[tuple[str, Callable[[], object]] | None]  # None — a separator
 
 
@@ -85,6 +87,7 @@ def scroll_area(parent: QWidget | None = None, margins: tuple[int, int, int, int
     return area, inner, layout
 
 
+@guard_events
 class WheelGuard(QObject):
     """The wheel over a drop-down or a number box that does not have the focus scrolls
     the page instead of changing the value (Qt.StrongFocus does not stop it, see the

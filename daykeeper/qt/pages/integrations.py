@@ -45,6 +45,7 @@ from ..widgets.countlist import count_list
 from ..widgets.flow import flow_host
 from ..widgets.toast import Toast
 from .base import TabPage
+from ..errors import guard_events
 
 POLL_TICK_MS = 15_000  # how often the app asks “is a check due?”
 FEED_MIN_WIDTH = 380  # px; narrower than settings + this, the notifications go under the settings
@@ -236,6 +237,7 @@ class EventDelegate(QStyledItemDelegate):
         painter.restore()
 
 
+@guard_events
 class IntegrationsPage(TabPage):
     """The connections on the left, the settings of the picked one and the feed on the right."""
 

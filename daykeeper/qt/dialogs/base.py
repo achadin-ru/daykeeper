@@ -16,6 +16,7 @@ from ... import palette, win32
 from ...i18n import _
 from .. import theme
 from ..widgets.secret_edit import SecretEdit
+from ..errors import guard_events
 
 
 def register(window: QWidget | None, child: QWidget) -> None:
@@ -48,6 +49,7 @@ def label(text: str, role: str = "", parent: QWidget | None = None) -> QLabel:
     return lab
 
 
+@guard_events
 class Dialog(QDialog):
     """A modal window over `parent` with a grid `box` to build in. `keys(ok)` makes
     Return run `ok` (Escape always closes); `editor_buttons` makes the Delete / Save /
