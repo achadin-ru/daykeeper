@@ -95,6 +95,15 @@ class ArgvTest(unittest.TestCase):
         self.assertEqual(argv[argv.index("-l") + 1], calls.DEFAULT_LANGUAGE)
         self.assertGreaterEqual(int(argv[argv.index("-t") + 1]), 1)
 
+    def test_transcribe_language_is_a_code_or_auto(self):
+        for given, expected in (("en", "en"), (" RU ", "ru"), ("yue", "yue"), ("auto", "auto"), (None, "auto"),
+                                ("-h", "auto"), ("--help", "auto"), ("e", "auto"), ("engl", "auto"), ("e1", "auto"),
+                                ("en -t 64", "auto"), ("ру", "auto")):
+            with self.subTest(given=given):
+                argv = calls.transcribe_argv("w", "m", "a.wav", given, 2)  # type: ignore[arg-type]
+                self.assertEqual(argv[argv.index("-l") + 1], expected)
+                self.assertEqual(len(argv), 11)
+
     def test_default_threads(self):
         self.assertEqual(calls.default_threads(1), 1)
         self.assertEqual(calls.default_threads(8), 4)
@@ -106,11 +115,22 @@ class ArgvTest(unittest.TestCase):
         argv = calls.ffmpeg_argv("a.mp3", "a.wav", which_of({"ffmpeg": "/usr/bin/ffmpeg"}))
         assert argv is not None
         self.assertEqual(argv[0], "/usr/bin/ffmpeg")
-        self.assertEqual(argv[argv.index("-i") + 1], "a.mp3")
+        self.assertEqual(argv[argv.index("-i") + 1], "file:a.mp3")
         self.assertEqual(argv[argv.index("-ar") + 1], "16000")
         self.assertEqual(argv[argv.index("-ac") + 1], "1")
         self.assertEqual(argv[-1], "a.wav")
         self.assertIn("-nostdin", argv)
+
+    def test_ffmpeg_reads_the_input_as_a_file_only(self):
+        found = which_of({"ffmpeg": "ffmpeg"})
+        for src in ("concat:a.mp3|b.mp3", "http://example.com/a.mp3", "-i.mp3", r"C:\Users\me\call.mp3", "/home/me/call.mp3"):
+            with self.subTest(src=src):
+                argv = calls.ffmpeg_argv(src, "out.wav", found)
+                assert argv is not None
+                self.assertEqual(argv[argv.index("-i") + 1], "file:" + src)
+        argv = calls.ffmpeg_argv(Path("dir") / "call.mp3", "out.wav", found)
+        assert argv is not None
+        self.assertEqual(argv[argv.index("-i") + 1], "file:" + str(Path("dir") / "call.mp3"))
 
 
 def wav_head(rate=16000, channels=1, bits=16, fmt=1) -> bytes:
@@ -207,6 +227,13 @@ class DigestTest(unittest.TestCase):
             d = calls.parse_digest(text)  # type: ignore[arg-type]
             self.assertTrue(d.is_empty(), repr(text))
 
+    def test_deep_nesting_is_empty_not_an_error(self):
+        deep = "[" * 100_000 + "]" * 100_000  # past the parser's stack limit: a RecursionError inside
+        for text in ('{"a": ' + deep + "}", '{"a": ' + "[" * 100_000, "```json\n" + '{"a": ' + deep + "}\n```"):
+            with self.subTest(size=len(text)):
+                self.assertTrue(calls.parse_digest(text).is_empty())
+        self.assertEqual(calls.parse_digest('{"x": ' + deep + '} {"summary": "ok"}').summary, "ok", "the next object is still found")
+
     def test_odd_types(self):
         d = calls.parse_digest('{"summary": {"a": 1}, "notes": 5, "tasks": "Write the report"}')
         self.assertEqual((d.summary, d.notes, d.tasks), ("", [], [calls.Task("Write the report")]))
@@ -259,7 +286,7 @@ class TranscriptFileTest(unittest.TestCase):
         self.assertEqual(calls.transcript_path(self.data, cid).parent, self.data / "calls")
 
     def test_bad_id_refused(self):
-        for bad in ("../x", "a/b", "a\\b", "", "x" * 65, "a.b"):
+        for bad in ("../x", "a/b", "a\\b", "", "x" * 65, "a.b", "abc\n", "abc\r\n", "\nabc"):
             with self.assertRaises(ValueError, msg=bad):
                 calls.transcript_path(self.data, bad)
 

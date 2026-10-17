@@ -145,11 +145,21 @@ def default_threads(cpu_count: int | None = None) -> int:
     return max(1, min(8, (n or 2) // 2))
 
 
+_LANGUAGE = re.compile(r"[a-z]{2,3}")
+
+
+def whisper_language(language: str | None) -> str:
+    """The value for whisper's -l: "auto" or a two- or three-letter code ("en", "ru",
+    "yue"); anything else — "-h" would read as an option — falls back to "auto"."""
+    code = (language or "").strip().lower()
+    return code if code == DEFAULT_LANGUAGE or _LANGUAGE.fullmatch(code) else DEFAULT_LANGUAGE
+
+
 def transcribe_argv(binary: str, model: str, wav: str, language: str = DEFAULT_LANGUAGE, threads: int = 0) -> list[str]:
     """whisper-cli for one WAV (16 kHz mono): plain text, no timestamps (-nt), no progress
     lines (-np). `threads` 0 or less — by the processors."""
     count = threads if threads > 0 else default_threads()
-    return [binary, "-m", model, "-f", wav, "-l", (language or DEFAULT_LANGUAGE).strip(), "-t", str(count), "-nt", "-np"]
+    return [binary, "-m", model, "-f", wav, "-l", whisper_language(language), "-t", str(count), "-nt", "-np"]
 
 
 def is_transcript(path: str | os.PathLike) -> bool:
@@ -185,11 +195,13 @@ def needs_conversion(path: str | os.PathLike, head: bytes | None = None) -> bool
 
 def ffmpeg_argv(src: str | os.PathLike, dst: str | os.PathLike, which: Which = shutil.which) -> list[str] | None:
     """ffmpeg making a WAV of 16 kHz mono from `src`, or None when ffmpeg is not on PATH
-    (the wizard then asks for a WAV)."""
+    (the wizard then asks for a WAV). The input goes with the “file:” protocol, so a name
+    like “concat:a|b” or “http:…” is only ever read as a local file; ffmpeg's file
+    protocol takes the rest as the path as is, a Windows one (“file:C:\\x.mp3”) too."""
     ffmpeg = which("ffmpeg")
     if not ffmpeg:
         return None
-    return [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", os.fspath(src), "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", os.fspath(dst)]
+    return [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", "file:" + os.fspath(src), "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", os.fspath(dst)]
 
 
 # ---- what whisper printed
@@ -267,12 +279,14 @@ _FENCE = re.compile(r"```[a-zA-Z0-9_-]*\s*\n?(.*?)```", re.S)
 
 
 def _first_object(text: str) -> dict | None:
+    """The first JSON object in the text, or None. Never raises: broken JSON is a
+    ValueError, JSON nested deeper than Python's recursion limit a RecursionError."""
     decoder = json.JSONDecoder()
     start = text.find("{")
     while start != -1:
         try:
             value, _end = decoder.raw_decode(text, start)
-        except ValueError:
+        except (ValueError, RecursionError):
             value = None
         if isinstance(value, dict):
             return value
@@ -363,12 +377,12 @@ def new_call_id() -> str:
     return secrets.token_hex(6)
 
 
-_SAFE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 def transcript_path(data_dir: str | os.PathLike, call_id: str) -> Path:
     """`<data>/calls/<id>.md`; an id that could step out of the folder is refused."""
-    if not _SAFE_ID.match(call_id):
+    if not _SAFE_ID.fullmatch(call_id):
         raise ValueError(f"bad call id: {call_id!r}")
     return Path(data_dir) / CALLS_DIR / f"{call_id}.md"
 
