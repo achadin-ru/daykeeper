@@ -210,6 +210,14 @@ QCheckBox::indicator {{ border-radius: 4px; }}
 QRadioButton::indicator {{ border-radius: 8px; }}
 QCheckBox::indicator:checked, QRadioButton::indicator:checked {{ background: {t.ACCENT}; border: 1px solid {t.ACCENT}; }}
 QSpinBox {{ background: {t.FIELD}; color: {t.TEXT}; border: 1px solid {t.BORDER}; border-radius: 8px; padding: 4px 8px; }}
+QDialog#Settings, QStackedWidget#SettingsBody, QScrollArea#SettingsScroll, QWidget#SettingsScrollInner {{ background: {t.BG}; border: none; }}
+QFrame#Group {{ background: {t.CARD}; border: 1px solid {t.BORDER}; border-radius: 12px; }}
+QFrame#Group QLabel, QFrame#Group QCheckBox, QFrame#Group QRadioButton {{ background: transparent; }}
+QListWidget#SettingsNav {{ background: transparent; font-size: {font_pt(11)}pt; }}
+QListWidget#SettingsNav::item {{ padding: 8px 10px; border-radius: 8px; }}
+QListWidget#SettingsNav::item:selected {{ background: {t.ACCENT_SOFT}; color: {t.ACCENT_INK}; font-weight: bold; }}
+QLabel[role="ok"] {{ color: {t.SUCCESS}; }}
+QWidget#FileViewer {{ background: {t.CARD}; }}
 QProgressBar {{ background: {t.HOVER}; border: none; border-radius: 3px; max-height: 6px; text-align: center; }}
 QProgressBar::chunk {{ background: {t.SUCCESS}; border-radius: 3px; }}
 """

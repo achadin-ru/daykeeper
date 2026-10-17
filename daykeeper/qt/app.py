@@ -253,6 +253,10 @@ class MainWindow(QMainWindow):
         self.runs: Any = None
         self._install_shortcuts()
         self._init_background()
+        if self.background_jobs:  # a preview copy changes nothing outside its window
+            from .dialogs.settings_claude import refresh_helper_in_background
+
+            refresh_helper_in_background()  # a connected Claude Code hook gets this build's helper
         self._inbox_ticker.start()
         self._restore_window()
         self.show_unlock()

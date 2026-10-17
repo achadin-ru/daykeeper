@@ -39,7 +39,7 @@ def icon_button(text: str, tip: str = "", on_click: Callable[[], object] | None 
     if tip:
         b.setToolTip(tip)
     if on_click is not None:
-        b.clicked.connect(on_click)
+        b.clicked.connect(lambda _checked=False: on_click())  # `clicked` brings a flag the function does not take
     return b
 
 
