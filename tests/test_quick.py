@@ -77,6 +77,15 @@ class IndexTest(unittest.TestCase):
         self.assertEqual(sorted(i.title for i in by.values() if i.kind == "template"), ["Mail reply", "Standup"])
         self.assertEqual({i.id for i in by.values() if i.kind == "command"}, {"lock", "digest", "today", "clip", "settings"})
 
+    def test_preset_2fa_field_in_both_languages(self):
+        for name in ("2FA key", RU["2FA key"], RU["2FA key"].capitalize()):
+            vault = Vault(Path("unused.pkv"), b"\x00" * 32, b"\x00" * 16, (1, 8, 1), [])
+            entry = vault.add_entry("Bank", kind="login")
+            entry.fields = [Field("password", "hunter-swordfish", secret=True), Field(name, "JBSWY3DPEHPK3PXP", secret=True)]
+            vault._normalize()
+            item = next(i for i in index(vault, (), None, today=TODAY) if i.kind == "entry")
+            self.assertIn("copy_code", item.actions, name)
+
     def test_commands(self):
         items = self.build()
         self.assertEqual(rank(items, "/lo", [])[0].id, "lock")
@@ -184,6 +193,22 @@ class ParseEntryTest(unittest.TestCase):
     def test_no_journal_meaning(self):
         for text in ("", "   ", "DEMO-12", "mail service", "pass manager", "DEMO-1 verified failed", "verified", "вчера", "pass", "DEMO-12 verified the fix"):
             self.assertIsNone(self.parse(text), text)
+
+    def test_token_looking_line_is_not_an_entry(self):
+        for text in (
+            "note deploy key glpat-abcdefghijklmnopqrst",
+            "note aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3z",
+            "glpat-abcdefghijklmnopqrst verified",
+        ):
+            self.assertIsNone(self.parse(text), text)
+        self.assertIsNotNone(self.parse("note see https://example.com/aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3z"), "a link is not a token")
+
+    def test_write_entry_skips_a_token(self):
+        jl.configure(self.qa)
+        j = Journal()
+        entry = quick.QuickEntry("note", ["glpat-abcdefghijklmnopqrst", "nightly triage"], TODAY, "", "activity")
+        self.assertEqual(write_entry(entry, j), 1)
+        self.assertEqual(j.get(TODAY).activities, [{"kind": "note", "text": "nightly triage"}])
 
     def test_preview_label(self):
         found = parse_entry("pass DEMO-12 DEMO-13", self.qa, TODAY)

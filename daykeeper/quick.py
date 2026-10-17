@@ -7,7 +7,9 @@ index (as in `Vault.search`): nothing here opens a sealed field.
 
 `parse_entry` reads a line such as “pass DEMO-12 DEMO-13”, “DEMO-12 verified”, “!7 opened
 yesterday” or “note nightly run triage” as a journal entry, with the words of the journal
-layout in use (the same words `daykeeper-cli` takes) and verbs in either UI language."""
+layout in use (the same words `daykeeper-cli` takes) and verbs in either UI language. A
+line whose items look like a token or a key is not an entry (the rule of `daykeeper-cli`):
+the journal is plain text."""
 
 from __future__ import annotations
 
@@ -16,6 +18,7 @@ from dataclasses import dataclass
 from datetime import date as Date, timedelta
 
 from .bookmarks import URL_KEYS, _key_in, entry_login, has_secret
+from .hookrules import looks_secret
 from .i18n import _, fmt_day, variants
 from .journal import ISSUE_KEY_RE, MR_URL_RE, normalize_item, normalize_mr, today as journal_today
 from .journal_layout import ROLE_MR, ROLE_NOTE, ROLE_PLAIN, Layout
@@ -53,7 +56,13 @@ KIND_LABELS: dict[str, str] = {  # what the second line of a result says it is (
     "command": "Command",
 }
 
-OTP_KEYS = ("2fa", "totp", "otp", "otpauth")  # field names of a two-factor secret
+OTP_KEYS = ("2fa", "totp", "otp", "otpauth")  # short field names of a two-factor secret
+OTP_PRESET = "2FA key"  # the field of the app's own templates (vault.KIND_TEMPLATES), in any UI language
+
+
+def _is_otp_field(name: str) -> bool:
+    folded = name.strip().casefold()
+    return folded in OTP_KEYS or folded in {v.casefold() for v in variants(OTP_PRESET)}
 
 
 @dataclass
@@ -80,6 +89,7 @@ def _words(text: str) -> list[str]:
     return [w for w in re.split(r"[\W_]+", text) if w]
 
 
+# TODO: import bookmarks.entry_url instead once fix/entry-url-secret is merged (it stops opening secret fields)
 def _entry_url(entry) -> str:
     """bookmarks.entry_url without reading a secret field: that one opens every value it
     looks at, and the index opens none."""
@@ -101,7 +111,7 @@ def _entry_item(entry) -> Item:
         actions.append("copy_password")
     if login:
         actions.append("copy_login")
-    if any(f.secret and f.filled and f.key.strip().lower() in OTP_KEYS for f in entry.fields):
+    if any(f.secret and f.filled and _is_otp_field(f.key) for f in entry.fields):
         actions.append("copy_code")
     if _entry_url(entry):
         actions.append("open_site")
@@ -294,7 +304,9 @@ def parse_entry(text: str, layout: Layout, today: str) -> QuickEntry | None:
 
     The forms: a journal word first and items after it (“pass DEMO-12 DEMO-13”, “note any
     text”), or items with a journal word or a verb anywhere among them (“DEMO-12 verified”,
-    “!7 opened”). A day word at either end (“yesterday”, “вчера”) moves it a day back."""
+    “!7 opened”). A day word at either end (“yesterday”, “вчера”) moves it a day back.
+    None too when an item looks like a token or a key (`hookrules.looks_secret`, as
+    `daykeeper-cli` refuses it): the line stays a search and nothing reaches the journal."""
     tokens = text.split()
     shift = 0
     for end in (-1, 0):
@@ -322,6 +334,8 @@ def parse_entry(text: str, layout: Layout, today: str) -> QuickEntry | None:
         items = tokens[:n] + tokens[n + 1:]
         if not items or not all(_is_reference(t) for t in items):
             return None
+    if any(looks_secret(x) for x in items):
+        return None
     clean: list[str] = []
     for raw in items:
         item = normalize_mr(raw) if where == "activity" and layout.role(ident) == ROLE_MR else normalize_item(raw)
@@ -338,10 +352,13 @@ def parse_entry(text: str, layout: Layout, today: str) -> QuickEntry | None:
 
 def write_entry(entry: QuickEntry, journal) -> int:
     """File the entry into the journal (the open vault's); the number of new items. The
-    caller marks the journal dirty, so Ctrl+Z takes it back."""
+    caller marks the journal dirty, so Ctrl+Z takes it back. An item that looks like a
+    token or a key is not filed (an entry built by hand skips the gate of `parse_entry`)."""
     day = journal.get(entry.date, create=True)
     added = 0
     for item in entry.items:
+        if looks_secret(item):
+            continue
         if day.add_activity(entry.status, item) if entry.section == "activity" else day.add(entry.status, item):
             added += 1
     return added
