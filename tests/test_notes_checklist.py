@@ -33,8 +33,11 @@ class NoteCardTest(unittest.TestCase):
         self.app.report_callback_exception = lambda *exc: self.errors.append(repr(exc[1]))
         self.app.unlock(PASSWORD)
         self.note = self.app.vault.notes.add(today(), title="list", text="first\nsecond")
+        # the long item must wrap at any card width the window may give it: on a runner
+        # with a 1024 px screen the day is one column, and a tail of one line fits there
+        long_tail = " and a long tail that wraps onto a second line of the card for sure" * 4
         for i in range(4):
-            self.note.add_item(f"item {i}" + (" and a long tail that wraps onto a second line of the card for sure" if i == 1 else ""))
+            self.note.add_item(f"item {i}" + (long_tail if i == 1 else ""))
         self.note.toggle(self.note.items[3])
         self.app.session.touch("notes")
         self.app.show_page("notes")
