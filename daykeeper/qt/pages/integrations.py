@@ -181,7 +181,7 @@ class EventDelegate(QStyledItemDelegate):
 
     def _width(self, option: QStyleOptionViewItem) -> int:
         view = self.parent()
-        w = option.rect.width()  # type: ignore[attr-defined]
+        w = option.rect.width()
         if w <= 0 and isinstance(view, QListWidget):
             w = view.viewport().width()
         return max(120, w)
@@ -199,7 +199,7 @@ class EventDelegate(QStyledItemDelegate):
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex) -> None:
         t = theme.current()
-        r = option.rect  # type: ignore[attr-defined]
+        r = option.rect
         ev, more = self._texts(index)
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -210,7 +210,7 @@ class EventDelegate(QStyledItemDelegate):
             painter.restore()
             return
         box = QRectF(r).adjusted(0.5, 3.5, -0.5, -3.5)
-        hot = bool(option.state & QStyle.StateFlag.State_MouseOver)  # type: ignore[attr-defined]
+        hot = bool(option.state & QStyle.StateFlag.State_MouseOver)
         painter.setPen(QColor(t.ACCENT if hot else t.BORDER))
         painter.setBrush(QColor(t.TILE if ev.read else t.ACCENT_SOFT))
         painter.drawRoundedRect(box, 10, 10)
@@ -252,7 +252,7 @@ class IntegrationsPage(TabPage):
             item = QListWidgetItem(text, self.connections)
             item.setData(Qt.ItemDataRole.UserRole, key)
         self.connections.setCurrentRow(0)
-        self.connections.currentRowChanged.connect(lambda _r: self.render())
+        self.connections.currentRowChanged.connect(lambda _r: self.render_page())
         col.addWidget(self.connections, 1)
 
         self.columns = QBoxLayout(QBoxLayout.Direction.LeftToRight, right)
@@ -296,7 +296,7 @@ class IntegrationsPage(TabPage):
         return super().view_key() + (self.shell.gitlab.status,)
 
     def refresh(self, keep_scroll: bool = False) -> None:
-        self.render()
+        self.render_page()
 
     def eventFilter(self, obj, event) -> bool:
         from PySide6.QtCore import QEvent
@@ -340,11 +340,13 @@ class IntegrationsPage(TabPage):
             if w is not None:
                 w.hide()
                 w.deleteLater()
-            elif item.layout() is not None:
-                QWidget().setLayout(item.layout())  # the layout and its widgets go with a throwaway owner
+            else:
+                inner = item.layout()
+                if inner is not None:
+                    QWidget().setLayout(inner)  # the layout and its widgets go with a throwaway owner
         self.status_label = None
 
-    def render(self) -> None:
+    def render_page(self) -> None:
         if self.vault is None:
             return
         self._clear_settings()

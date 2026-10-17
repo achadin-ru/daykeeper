@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import sys
 import tempfile
-import time
 import unittest
 from unittest import mock
 
@@ -140,7 +139,7 @@ class IntegrationsTest(unittest.TestCase):
         self.assertIn("Check failed", self.win.gitlab.status)
 
     def test_settings_are_kept(self):
-        self.page.render()
+        self.page.render_page()
         checks = [w for w in self.page.settings.findChildren(integ_page.QCheckBox) if w.text() == "Watch"]
         checks[0].setChecked(True)
         self.assertTrue(self.win.vault.integrations.gitlab.enabled)
