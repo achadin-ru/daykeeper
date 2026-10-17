@@ -49,6 +49,7 @@ TIMEOUT_TEXT = "GitLab did not answer in time"
 PLAIN_HTTP_TEXT = "The token is sent over https only — write the address with https://"
 FOREIGN_REDIRECT_TEXT = "GitLab sends the request to another server — check the address in the settings"
 _LOOPBACK = ("localhost", "127.0.0.1", "::1")
+MR_ROLES = ("author", "reviewer")
 
 
 def _token_may_go(url: str, origin: str) -> None:
@@ -175,16 +176,24 @@ class Event:
     ts: float = field(default_factory=time.time)
     read: bool = False
     source: str = "gitlab"  # which integration raised it
+    project_id: int = 0  # the GitLab project of an MR event; 0 — not an MR or an older record
+    role: str = ""  # "author" | "reviewer": my part in that MR; "" — unknown
 
     def to_dict(self) -> dict:
-        return {"kind": self.kind, "mr": self.mr, "title": self.title, "url": self.url, "text": self.text, "args": self.args, "ts": self.ts, "read": self.read, "source": self.source}
+        d = {"kind": self.kind, "mr": self.mr, "title": self.title, "url": self.url, "text": self.text, "args": self.args, "ts": self.ts, "read": self.read, "source": self.source}
+        if self.project_id:
+            d["project_id"] = self.project_id
+        if self.role:
+            d["role"] = self.role
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> Event:
         return cls(
             kind=str(d.get("kind", "")), mr=str(d.get("mr", "")), title=str(d.get("title", "")), url=web_url(d.get("url")),
             text=str(d.get("text", "")), args=dict(d["args"]) if isinstance(d.get("args"), dict) else {}, ts=number(float, d.get("ts"), None) or time.time(), read=bool(d.get("read", False)),
-            source=str(d.get("source") or "gitlab"),
+            source=str(d.get("source") or "gitlab"), project_id=number(int, d.get("project_id"), 0),
+            role=role if (role := d.get("role")) in MR_ROLES else "",
         )
 
 
@@ -270,6 +279,7 @@ class GitLabClient:
     def get(self, path: str, **params) -> object:
         query = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
         url = f"{self.base}{path}" + (f"?{query}" if query else "")
+        _token_may_go(url, self.base)  # whatever `fetch` is: no token over plain http
         status, body = self._fetch(url, {"PRIVATE-TOKEN": self.token, "Accept": "application/json"})
         if status == 401:
             raise GitLabError("401 Unauthorized — the token is wrong or expired")
@@ -305,6 +315,29 @@ class GitLabClient:
         if not isinstance(user, dict) or "id" not in user:
             raise GitLabError("Unexpected answer from /user")
         return user
+
+    def mr(self, project: int | str, iid: int) -> dict:
+        """One merge request: title, author, branches, description, head pipeline.
+        `project` — the numeric id or the “group/repo” path."""
+        answer = self.get(f"/projects/{_project_ref(project)}/merge_requests/{int(iid)}")
+        if not isinstance(answer, dict):
+            raise GitLabError("Unexpected answer for the merge request")
+        return answer
+
+    def mr_changes(self, project: int | str, iid: int) -> dict:
+        """The merge request with its `changes`: one diff a file (read_api is enough)."""
+        answer = self.get(f"/projects/{_project_ref(project)}/merge_requests/{int(iid)}/changes")
+        if not isinstance(answer, dict):
+            raise GitLabError("Unexpected answer for the merge request changes")
+        return answer
+
+
+def _project_ref(project: int | str) -> str:
+    """A project id stays as it is, a path is URL-encoded (“group/repo” → “group%2Frepo”)."""
+    text = str(project).strip().strip("/")
+    if not text:
+        raise GitLabError("No project given")
+    return text if text.isdigit() else project_path(text)
 
 
 def mr_key(mr: dict) -> str:
@@ -477,7 +510,9 @@ def diff_snapshots(old: dict[str, dict], new: dict[str, dict], rules: GitLabSett
 
     def add(kind: str, key: str, facts: dict, text: str, **args) -> None:
         if rules.rule(kind):
-            events.append(Event(kind, key, facts.get("title", ""), facts.get("url", ""), text, args))
+            role = facts.get("role")
+            events.append(Event(kind, key, facts.get("title", ""), facts.get("url", ""), text, args,
+                                project_id=number(int, facts.get("project_id"), 0), role=role if role in MR_ROLES else ""))
 
     for key, now in new.items():
         before = old.get(key)
