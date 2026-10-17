@@ -65,18 +65,29 @@ class FlowLayout(QLayout):
         return out
 
     def _lay_out(self, rect: QRect, apply: bool) -> int:
+        """Lines of items left to right; the items of a line are centred on it (a primary
+        button and a smaller one beside it line up on their middles)."""
         m = self.contentsMargins()
         area = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
-        x, y, line = area.x(), area.y(), 0
+        lines: list[list[tuple[QLayoutItem, QSize]]] = [[]]
+        x = area.x()
         for item in self._visible():
             hint = item.sizeHint()
-            if x > area.x() and x + hint.width() > area.right() + 1:
-                x, y, line = area.x(), y + line + self._v, 0
-            if apply:
-                item.setGeometry(QRect(QPoint(x, y), hint))
+            if lines[-1] and x + hint.width() > area.right() + 1:
+                lines.append([])
+                x = area.x()
+            lines[-1].append((item, hint))
             x += hint.width() + self._h
-            line = max(line, hint.height())
-        return y + line - rect.y() + m.bottom()
+        y = area.y()
+        for n, line in enumerate(lines):
+            height = max((h.height() for _i, h in line), default=0)
+            if apply:
+                x = area.x()
+                for item, hint in line:
+                    item.setGeometry(QRect(QPoint(x, y + (height - hint.height()) // 2), hint))
+                    x += hint.width() + self._h
+            y += height + (self._v if n < len(lines) - 1 else 0)
+        return y - rect.y() + m.bottom()
 
 
 def flow_host(parent: QWidget | None = None, spacing: int = 8) -> tuple[QWidget, FlowLayout]:

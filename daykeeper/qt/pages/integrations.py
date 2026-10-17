@@ -443,15 +443,14 @@ class IntegrationsPage(TabPage):
         col.addWidget(rules_host)
         self._render_projects()
         col.addSpacing(16)
-        actions = QHBoxLayout()
         check = button(_("Check now"), "primary", body)
         check.clicked.connect(lambda: self.shell.gitlab.check_now())
-        actions.addWidget(check)
+        col.addWidget(check, 0, Qt.AlignmentFlag.AlignLeft)
+        col.addSpacing(6)
         who = _("Signed in as @{user}").format(user=gl.username) if gl.username else ""
-        self.status_label = label(self.shell.gitlab.status or who, "muted", body)
+        self.status_label = label(self.shell.gitlab.status or who, "muted", body)  # under the button: a long status wraps, never cut
         self.status_label.setWordWrap(True)
-        actions.addWidget(self.status_label, 1)
-        col.addLayout(actions)
+        col.addWidget(self.status_label)
         col.addStretch(1)
         self._settings_width = max(560, min(760, body.sizeHint().width() + 20))
 

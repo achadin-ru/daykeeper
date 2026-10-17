@@ -138,7 +138,9 @@ QPushButton {{
 QPushButton:hover {{ background: {t.RAISED_HOVER}; }}
 QPushButton:pressed {{ background: {t.PRESSED}; }}
 QPushButton:disabled {{ color: {t.DISABLED_TEXT}; }}
-QPushButton[role="primary"] {{ background: {t.ACCENT}; color: {t.ON_ACCENT}; border: none; font-weight: bold; padding: 8px 16px; }}
+QPushButton[role="primary"] {{ background: {t.ACCENT}; color: {t.ON_ACCENT}; border: none; font-weight: 600; padding: 8px 16px; }}
+QMessageBox QLabel {{ font-size: {font_pt(11)}pt; }}
+QMessageBox QPushButton {{ font-size: {font_pt(11)}pt; padding: 5px 16px; min-width: 64px; }}
 QPushButton[role="primary"]:hover {{ background: {t.ACCENT_HOVER}; }}
 QPushButton[role="primary"]:pressed {{ background: {t.ACCENT_PRESSED}; }}
 QPushButton[role="primary"]:disabled {{ background: {t.ACCENT_DISABLED}; color: {t.ON_ACCENT}; }}
@@ -195,6 +197,7 @@ QComboBox {{
 }}
 QComboBox:focus {{ border: 1px solid {t.ACCENT}; }}
 QComboBox::drop-down {{ border: none; width: 22px; }}
+QComboBox {{ combobox-popup: 0; }}
 QComboBox QAbstractItemView {{ background: {t.FIELD}; color: {t.TEXT}; border: 1px solid {t.BORDER}; selection-background-color: {t.ACCENT_SOFT}; selection-color: {t.TEXT}; outline: none; }}
 QListView, QTreeView, QListWidget {{
     background: {t.SIDEBAR}; color: {t.TEXT}; border: none; outline: none;

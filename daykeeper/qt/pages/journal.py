@@ -91,7 +91,7 @@ class JournalPage(TabPage):
         with_icon(report, _("📋  Build report"), on_accent=True)
         report.clicked.connect(self.report_dialog)
         actions.addWidget(report)
-        inbox_btn = button(_("Read the inbox now"), "small", actions_host)
+        inbox_btn = button(_("Read the inbox now"), "", actions_host)  # the height of the report button beside it
         inbox_btn.setToolTip(_("The sessions' inbox is read every minute by itself; this reads it right away"))
         inbox_btn.clicked.connect(lambda: self.shell.pull_inbox(loud=True))
         actions.addWidget(inbox_btn)
