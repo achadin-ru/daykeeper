@@ -42,6 +42,8 @@ def _win():
     user32.RegisterClipboardFormatW.restype = wintypes.UINT
     user32.IsClipboardFormatAvailable.argtypes = [wintypes.UINT]
     user32.IsClipboardFormatAvailable.restype = wintypes.BOOL
+    user32.GetClipboardSequenceNumber.argtypes = []
+    user32.GetClipboardSequenceNumber.restype = wintypes.DWORD
     kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
     kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
     kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
@@ -151,6 +153,35 @@ def has_history_opt_out() -> bool:
         return False
     user32, _kernel32 = api
     return bool(user32.IsClipboardFormatAvailable(user32.RegisterClipboardFormatW(_HISTORY)))
+
+
+def sequence_number() -> int | None:
+    """Windows: the clipboard's change counter — a cheap call that opens nothing, so a
+    poll reads the text only when this moved. None outside Windows (or 0 there: no
+    access to the window station)."""
+    api = _api()
+    if api is None:
+        return None
+    user32, _kernel32 = api
+    return int(user32.GetClipboardSequenceNumber()) or None
+
+
+def excluded_from_history() -> bool:
+    """Windows: does the clipboard carry a “keep out of history” mark — the one Daykeeper
+    puts on a copied secret and other password managers put on theirs:
+    “ExcludeClipboardContentFromMonitorProcessing”, or “CanIncludeInClipboardHistory”
+    (Windows sets it to 0 for “no”; its value is not read, so its mere presence counts —
+    erring on the side of not recording). Only asks which formats are there: the
+    clipboard is not opened, read or changed."""
+    api = _api()
+    if api is None:
+        return False
+    user32, _kernel32 = api
+    for name in (_EXCLUDE, _HISTORY):
+        fmt = user32.RegisterClipboardFormatW(name)
+        if fmt and user32.IsClipboardFormatAvailable(fmt):
+            return True
+    return False
 
 
 class SecretClipboard:
