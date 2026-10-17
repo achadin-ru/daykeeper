@@ -5,7 +5,7 @@ import urllib.parse
 
 from daykeeper import markdown
 from daykeeper.gitlab import Event, GitLabClient, GitLabError, GitLabSettings, diff_snapshots
-from daykeeper.mr_preview import diff_counts, mr_context, render_mr
+from daykeeper.mr_preview import diff_counts, mr_template_context, render_mr
 
 URL = "https://gitlab.example.com/group/app/-/merge_requests/12"
 
@@ -112,13 +112,68 @@ class EscapingTest(unittest.TestCase):
         diff = "@@ -1,2 +1,2 @@\n ```\n-old\n+new\n ```\n"
         text = render_mr(MR, {"changes": [change("we`ird.md", diff)]})
         self.assertIn("### ``we`ird.md``", text)
-        self.assertIn("~~~diff\n", text, "a ``` line inside the diff must not close the block")
         code = [b for b in markdown.parse(text) if b.kind == "code"]
-        self.assertEqual(code[-1].raw, diff.rstrip("\n").split("\n", 0)[0])
+        self.assertEqual(len(code), 1, "a ``` line inside the diff must not close the block")
+        self.assertEqual(code[0].raw.replace("\u200b", ""), diff.rstrip("\n"), "the whole diff, as sent, in one block")
+
+    def test_a_diff_with_both_fence_kinds_stays_in_one_block(self):
+        diff = "@@ -1,4 +1,4 @@\n ```\n ~~~\n-old\n+new\n````\n   ~~~ more\n"
+        text = render_mr(MR, {"changes": [change("a.md", diff), change("b.py", EDIT)]})
+        blocks = markdown.parse(text)
+        code = [b for b in blocks if b.kind == "code"]
+        self.assertEqual(len(code), 2)
+        self.assertEqual(code[0].raw.replace("\u200b", ""), diff.rstrip("\n"))
+        self.assertEqual(code[1].raw, EDIT.rstrip("\n"))
+        self.assertIn("b.py", [b.text for b in blocks if b.kind == "heading"], "the next file's heading is still there")
+
+    def test_a_lone_carriage_return_in_a_diff_does_not_close_the_block(self):
+        text = render_mr(MR, {"changes": [change("a.md", "@@ -1 +1 @@\n+x\r```\n"), change("b.py", EDIT)]})
+        blocks = markdown.parse(text)
+        self.assertEqual(sum(1 for b in blocks if b.kind == "code"), 2)
+        self.assertIn("b.py", [b.text for b in blocks if b.kind == "heading"])
+
+    def test_a_fence_left_open_in_the_description_is_closed_with_its_own_marker(self):
+        for description in ("See:\n~~~\ncode\n```\nmore", "~~~\na\n~~~\n```py\nb", "```\na\n```\n  ~~~\nb", "x\r~~~\ny"):
+            with self.subTest(description=description):
+                headings = [b.text for b in markdown.parse(render_mr({**MR, "description": description}, CHANGES)) if b.kind == "heading"]
+                self.assertIn("Files (5, +4 −2)", headings)
+                self.assertIn("src/export.py", headings)
 
     def test_an_unclosed_fence_in_the_description_is_closed(self):
         text = render_mr({**MR, "description": "See:\n```\ncode"}, CHANGES)
         self.assertIn("src/export.py", [b.text for b in markdown.parse(text) if b.kind == "heading"])
+
+    def test_no_local_links_from_the_server(self):
+        traps = ["[x](../settings.json)", "[x](file:///C:/x)", "![i](c:\\x.png)", "[x](HTTP://up.case)",
+                 '[a](https://ok.example "[b](../in-title.json)")', "[[a](../one)](../two)"]
+        for trap in traps:
+            mr = {**MR, "title": f"Title {trap}", "author": {"name": f"Kim {trap}", "username": f"kim{trap}"},
+                  "description": f"Text {trap}\n\n- item {trap}\n> {trap}\n\n**{trap}**\nsplit [over\nlines](../x.json)"}
+            with self.subTest(trap=trap):
+                text = render_mr(mr, CHANGES)
+                for block in markdown.parse(text):
+                    for span in block.spans:
+                        if "link" in span.styles:
+                            self.assertTrue(span.href.startswith(("http://", "https://")), (span.href, block.text))
+                for gone in ("settings.json", "file:", "c:\\x.png", "../", "HTTP:"):
+                    self.assertNotIn(gone, text)
+
+    def test_visible_text_stays_and_web_links_keep_working(self):
+        mr = {**MR, "title": "Fix [the config](../settings.json)", "description": "See ![shot](c:/x.png) and [docs](https://docs.example/a)."}
+        text = render_mr(mr, CHANGES)
+        self.assertTrue(text.startswith("# Fix the config\n"))
+        self.assertIn("See shot and [docs](https://docs.example/a).", text)
+        links = [s.href for b in markdown.parse(text) for s in b.spans if "link" in s.styles]
+        self.assertIn("https://docs.example/a", links)
+        self.assertIn(URL, links)
+
+    def test_server_text_cannot_form_a_link_with_the_markup_around_it(self):
+        mr = {**MR, "references": {"full": "x](../settings.json!12"}, "author": {"name": "[a", "username": "b](../settings.json"},
+              "state": "[s](../settings.json)", "head_pipeline": {"status": "ok](../p", "web_url": "https://gitlab.example.com/p/1"}}
+        text = render_mr(mr, CHANGES)
+        hrefs = [s.href for b in markdown.parse(text) for s in b.spans if "link" in s.styles]
+        self.assertTrue(all(h.startswith(("http://", "https://")) for h in hrefs), hrefs)
+        self.assertNotIn("](../", text)
 
     def test_only_web_links(self):
         text = render_mr({**MR, "web_url": "javascript:alert(1)", "head_pipeline": {"status": "failed", "web_url": "file:///x"}}, {"changes": []})
@@ -137,14 +192,14 @@ class CountsTest(unittest.TestCase):
 
 class ContextTest(unittest.TestCase):
     def test_from_the_mr(self):
-        self.assertEqual(mr_context(MR), {"mr_url": URL, "mr_title": "Add the export | import screen", "mr_project": "group/app", "mr_iid": "12"})
+        self.assertEqual(mr_template_context(MR), {"mr_url": URL, "mr_title": "Add the export | import screen", "mr_project": "group/app", "mr_iid": "12"})
 
     def test_from_the_link_alone(self):
-        ctx = mr_context({"web_url": "https://gitlab.example.com/group/sub/app/-/merge_requests/7", "title": "T"})
+        ctx = mr_template_context({"web_url": "https://gitlab.example.com/group/sub/app/-/merge_requests/7", "title": "T"})
         self.assertEqual((ctx["mr_project"], ctx["mr_iid"]), ("group/sub/app", "7"))
 
     def test_from_nothing(self):
-        self.assertEqual(mr_context(None), {"mr_url": "", "mr_title": "", "mr_project": "", "mr_iid": ""})  # type: ignore[arg-type]
+        self.assertEqual(mr_template_context(None), {"mr_url": "", "mr_title": "", "mr_project": "", "mr_iid": ""})  # type: ignore[arg-type]
 
 
 class FakeFetch:
@@ -177,6 +232,19 @@ class ClientTest(unittest.TestCase):
             client.mr(34, 1)  # not a dict
         with self.assertRaises(GitLabError):
             client.mr_changes("", 1)
+
+    def test_a_merge_request_number_that_is_no_number(self):
+        fetch = FakeFetch({"/projects/34/merge_requests/12": MR})
+        client = GitLabClient("https://gitlab.example.com", "tok", fetch=fetch)
+        for iid in ("abc", "", "12a", "0", "-3", None):
+            with self.subTest(iid=iid):
+                with self.assertRaises(GitLabError) as caught:
+                    client.mr(34, iid)  # type: ignore[arg-type]
+                self.assertIn("Not a merge request number", str(caught.exception))
+                with self.assertRaises(GitLabError):
+                    client.mr_changes(34, iid)  # type: ignore[arg-type]
+        self.assertEqual(fetch.calls, [])
+        self.assertEqual(client.mr(34, " 12 ")["iid"], 12)  # type: ignore[arg-type]
 
     def test_plain_http_never_gets_the_token(self):
         fetch = FakeFetch({"/projects/34/merge_requests/12": MR})

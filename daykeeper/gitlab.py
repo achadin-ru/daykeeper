@@ -319,17 +319,28 @@ class GitLabClient:
     def mr(self, project: int | str, iid: int) -> dict:
         """One merge request: title, author, branches, description, head pipeline.
         `project` — the numeric id or the “group/repo” path."""
-        answer = self.get(f"/projects/{_project_ref(project)}/merge_requests/{int(iid)}")
+        answer = self.get(f"/projects/{_project_ref(project)}/merge_requests/{_iid(iid)}")
         if not isinstance(answer, dict):
             raise GitLabError("Unexpected answer for the merge request")
         return answer
 
     def mr_changes(self, project: int | str, iid: int) -> dict:
         """The merge request with its `changes`: one diff a file (read_api is enough)."""
-        answer = self.get(f"/projects/{_project_ref(project)}/merge_requests/{int(iid)}/changes")
+        answer = self.get(f"/projects/{_project_ref(project)}/merge_requests/{_iid(iid)}/changes")
         if not isinstance(answer, dict):
             raise GitLabError("Unexpected answer for the merge request changes")
         return answer
+
+
+def _iid(iid: int | str) -> int:
+    """A merge request number as the API wants it; anything else is a GitLabError."""
+    try:
+        number = int(str(iid).strip())
+    except ValueError:
+        raise GitLabError(f"Not a merge request number: {iid}") from None
+    if number < 1:
+        raise GitLabError(f"Not a merge request number: {iid}")
+    return number
 
 
 def _project_ref(project: int | str) -> str:

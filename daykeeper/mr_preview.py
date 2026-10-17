@@ -4,8 +4,8 @@
 writes a header (title, link, author, branches, pipeline), the description, a table of
 the files with the lines added and removed, then each file's diff in a fenced block. A
 big merge request is cut: whole files while they fit the byte budget, the rest is left to
-the browser. `mr_context` gives the placeholders of the assistant templates. Pure: no
-network, no tkinter; unit-tested on hand-written answers.
+the browser. `mr_template_context` gives the placeholders of the assistant templates.
+Pure: no network, no tkinter; unit-tested on hand-written answers.
 """
 
 from __future__ import annotations
@@ -18,6 +18,11 @@ from .i18n import _
 LIMIT_BYTES = 400_000  # of diff text; a page this size still opens in a moment
 _BINARY = re.compile(r"^(Binary files .* differ|GIT binary patch)\s*$", re.MULTILINE)
 _HUNK = re.compile(r"^@@ ")
+# a link as the viewer reads it (markdown._INLINE): [text](target "title"); an image
+# ![alt](target) is the same link there, with its "!" left as text
+_LINK_AT = re.compile(r"\[(?P<text>[^\]]+)\]\((?P<href>[^)\s]+)(?:\s+\"[^\"]*\")?\)")
+_WEB = ("http://", "https://")  # the only targets the viewer hands to the browser
+_ZWSP = "\u200b"  # not whitespace to the viewer, so a line it leads is no fence
 
 
 def _one_line(value) -> str:
@@ -42,16 +47,36 @@ def _code(value) -> str:
     return f"{fence}{pad}{text}{pad}{fence}"
 
 
-def _fence_for(body: str) -> str:
-    """A code fence no line of the body can close: ``` unless a line starts with it
-    (after spaces, as the viewer checks), then ~~~, then a longer run of backticks."""
-    starts = {line.strip()[:3] for line in body.splitlines()}
-    if "```" not in starts:
-        return "```"
-    if "~~~" not in starts:
-        return "~~~"
-    runs = [len(r) for r in re.findall(r"`+", body)]
-    return "`" * (max(runs, default=3) + 1)
+def _viewer_lines(text: str) -> list[str]:
+    """The lines as the viewer splits them: at “\\n”, “\\r\\n” and a lone “\\r” only."""
+    return text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+
+def _no_local_links(text: str) -> str:
+    """Server text with every link or image whose target is not a web address reduced to
+    its visible text. The viewer resolves any other target against the preview file and
+    opens it, so a merge request could point at the user's own files. Every “[” is tried,
+    a kept web link included, so a link hidden in its title is found too; a replacement
+    is read again from where it starts, as it may join with the text around it."""
+    pos = 0
+    while (start := text.find("[", pos)) != -1:
+        m = _LINK_AT.match(text, start)
+        if m is None or m.group("href").startswith(_WEB):
+            pos = start + 1
+            continue
+        begin = start - 1 if start and text[start - 1] == "!" else start
+        text = text[:begin] + m.group("text") + text[m.end():]
+        pos = begin
+    return text
+
+
+def _fenced(diff: str) -> list[str]:
+    """A diff in a ``` block that no line of it can close. The viewer opens a block on a
+    line starting (after spaces) with ``` or ~~~ and closes it on the first line starting
+    with the same three characters, whatever the fence length — so such a line gets a
+    zero-width space in front: it looks the same and is no fence any more."""
+    lines = _viewer_lines(diff.rstrip("\r\n"))
+    return ["```diff", *(_ZWSP + line if line.lstrip().startswith(("```", "~~~")) else line for line in lines), "```"]
 
 
 def diff_counts(diff: str) -> tuple[int, int]:
@@ -106,9 +131,17 @@ def _cut(diff: str, limit: int) -> str:
 
 
 def _balanced(text: str) -> str:
-    """A description with an unclosed code fence would swallow the rest of the page."""
-    fences = sum(1 for line in text.splitlines() if line.strip().startswith(("```", "~~~")))
-    return text + ("\n```" if fences % 2 else "")
+    """A description with an unclosed code fence would swallow the rest of the page. It
+    is closed the way the viewer reads fences: a block opened by ``` or ~~~ ends only on
+    a line starting with the same marker."""
+    marker = ""
+    for line in _viewer_lines(text):
+        head = line.strip()
+        if not marker:
+            marker = head[:3] if head.startswith(("```", "~~~")) else ""
+        elif head.startswith(marker):
+            marker = ""
+    return text + (f"\n{marker}" if marker else "")
 
 
 def render_mr(mr_json: dict, changes_json: dict, limit_bytes: int = LIMIT_BYTES) -> str:
@@ -123,7 +156,7 @@ def render_mr(mr_json: dict, changes_json: dict, limit_bytes: int = LIMIT_BYTES)
         return value if value not in (None, "") else extra.get(name)
 
     url = web_url(field("web_url"))
-    ctx = mr_context({**extra, **{k: v for k, v in mr.items() if v not in (None, "")}})
+    ctx = mr_template_context({**extra, **{k: v for k, v in mr.items() if v not in (None, "")}})
     out: list[str] = [f"# {_one_line(field('title')) or _('Merge request')}", ""]
     ref = f"{ctx['mr_project']}!{ctx['mr_iid']}" if ctx["mr_project"] and ctx["mr_iid"] else ""
     if url:
@@ -146,9 +179,12 @@ def render_mr(mr_json: dict, changes_json: dict, limit_bytes: int = LIMIT_BYTES)
         status = _one_line(pipeline.get("status"))
         link = web_url(pipeline.get("web_url"))
         out.append(f"- **{_('Pipeline')}:** " + (f"[{status}]({link})" if link else status))
-    out.append("")
+    # title, author, state and the reference are the server's text, and so is the
+    # description: none of it may carry a link to a local file, not even one formed
+    # together with the markup around it
+    out = [_no_local_links(line) for line in out] + [""]
 
-    description = str(field("description") or "").replace("\r\n", "\n").strip()
+    description = _no_local_links("\n".join(_viewer_lines(str(field("description") or ""))).strip())
     out += [f"## {_('Description')}", "", _balanced(description) if description else f"_{_('No description.')}_", ""]
 
     changes = _changes(changes_json)
@@ -182,8 +218,7 @@ def render_mr(mr_json: dict, changes_json: dict, limit_bytes: int = LIMIT_BYTES)
         elif not diff:
             body += [f"_{_('No changes in the text.')}_", ""]
         else:
-            fence = _fence_for(diff)
-            body += [fence + "diff", diff.rstrip("\n"), fence, ""]
+            body += [*_fenced(diff), ""]
         if cut:
             body += [f"_{_('The diff is cut here.')}_", ""]
             break
@@ -194,7 +229,7 @@ def render_mr(mr_json: dict, changes_json: dict, limit_bytes: int = LIMIT_BYTES)
     return "\n".join(out).rstrip("\n") + "\n"
 
 
-def mr_context(mr_json: dict) -> dict[str, str]:
+def mr_template_context(mr_json: dict) -> dict[str, str]:
     """{mr_url} {mr_title} {mr_project} {mr_iid} for the assistant templates. The project
     is the “group/repo” path, taken from the full reference or else from the link."""
     mr = mr_json if isinstance(mr_json, dict) else {}
