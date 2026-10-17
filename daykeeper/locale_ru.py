@@ -945,4 +945,5 @@ RU: dict[str, str] = {
     'Windows did not answer': 'Windows не ответила',
     '{combo} is already taken by another program': '{combo} уже занято другой программой',
     'Windows did not register {combo} (error {code})': 'Windows не зарегистрировала {combo} (ошибка {code})',
+    'Call {date}': 'Созвон {date}',
 }
