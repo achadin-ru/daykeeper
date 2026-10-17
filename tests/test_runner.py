@@ -49,6 +49,13 @@ class RunTest(unittest.TestCase):
         self.assertEqual(run.code, -1)
         self.assertEqual(len(run.lines), 1)
 
+    def test_extra_environment_reaches_the_child(self):
+        code = "import os; print(os.environ['DAYKEEPER_REF']); print(os.environ.get('PYTHONUTF8')); print('PATH' in os.environ)"
+        run = Run(_Routine(), [sys.executable, "-c", code], "", "", auto=True, env={"DAYKEEPER_REF": "group/repo!12"})
+        drain_until_end(run)
+        self.assertEqual(run.lines, ["group/repo!12", "1", "True"], "merged over the current environment")
+        self.assertEqual(run.code, 0)
+
     def test_decode_line(self):
         self.assertEqual(decode_line("привет\n".encode()), "привет\n")
         cp866 = "привет".encode("cp866")

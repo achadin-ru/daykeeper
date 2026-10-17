@@ -864,4 +864,7 @@ RU: dict[str, str] = {
     'Dark': 'Тёмное',
     'Restart now': 'Перезапустить',
     'Takes effect after a restart: the app asks for the master password again.': 'Применится после перезапуска: приложение снова спросит мастер-пароль.',
+    'A watched pipeline failed': 'Отслеживаемый пайплайн упал',
+    'A watched pipeline is green again': 'Отслеживаемый пайплайн снова зелёный',
+    'New commits on a watched branch': 'Новые коммиты в отслеживаемой ветке',
 }

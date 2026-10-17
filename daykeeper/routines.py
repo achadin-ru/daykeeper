@@ -1,5 +1,6 @@
 """Daily routine: quick-launch tiles for scripts, commands, links, folders and files, with an
-optional automatic start when the app is unlocked or at a time of day.
+optional automatic start when the app is unlocked, at a time of day or on an integration
+event (a merged MR, a failed pipeline: the GitLab rule codes).
 
 Stored inside the encrypted vault (key `routines`): the vault is authenticated, so nobody
 can slip a command into the auto-start list without the master password. Pure (no
@@ -20,13 +21,18 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .settings import number
+
+if TYPE_CHECKING:
+    from .gitlab import Event
 
 KINDS = ("script", "command", "url", "folder", "file")
 KIND_ICONS = {"script": "📜", "command": "⌨", "url": "🌐", "folder": "📁", "file": "📄"}
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")  # UI keys
 RUN_LOG_KEEP = 100
+EVENT_RUNS_MAX = 5  # runs started by the events of one check; the first look may bring dozens
 # Files a shortcut may point to that are programs to run (and wait for), not documents to open.
 RUNNABLE = {".exe", ".com", ".bat", ".cmd", ".ps1", ".py", ".pyw", ".sh", ".vbs", ".js", ".wsf"}
 # Programs that run scripts: started with no arguments they do nothing and end at once.
@@ -42,6 +48,8 @@ class Schedule:
     on_unlock: bool = False  # run once each time the vault is unlocked
     at: str = ""  # "HH:MM" — run at this time of day; "" — not by time
     days: list[int] = field(default_factory=lambda: [0, 1, 2, 3, 4])  # 0 = Monday
+    on_events: list[str] = field(default_factory=list)  # event kinds (rule codes) that start it; [] — none
+    projects: list[str] = field(default_factory=list)  # only events of these projects; [] — any
 
     def valid_time(self) -> tuple[int, int] | None:
         try:
@@ -72,14 +80,24 @@ class Schedule:
         return None
 
     def to_dict(self) -> dict:
-        return {"on_unlock": self.on_unlock, "at": self.at, "days": list(self.days)}
+        return {"on_unlock": self.on_unlock, "at": self.at, "days": list(self.days), "on_events": list(self.on_events), "projects": list(self.projects)}
+
+    def fires_on(self, kind: str, project: str) -> bool:
+        return kind in self.on_events and (not self.projects or project in self.projects)
 
     @classmethod
     def from_dict(cls, d) -> Schedule:
         if not isinstance(d, dict):
             return cls()
         days = sorted({int(x) for x in d.get("days", [0, 1, 2, 3, 4]) if str(x).isdigit() and 0 <= int(x) <= 6})
-        return cls(bool(d.get("on_unlock", False)), str(d.get("at", "")), days)
+        return cls(bool(d.get("on_unlock", False)), str(d.get("at", "")), days, _strings(d.get("on_events")), _strings(d.get("projects")))
+
+
+def _strings(value) -> list[str]:
+    """A list of non-empty strings from stored data, in order, without repeats."""
+    if not isinstance(value, list):
+        return []
+    return list(dict.fromkeys(x.strip() for x in value if isinstance(x, str) and x.strip()))
 
 
 @dataclass
@@ -188,12 +206,75 @@ class Routines:
     def due(self, now: datetime) -> list[Routine]:
         return [r for r in self.ordered() if r.schedule.due(now, r.last_run)]
 
+    def for_event(self, kind: str, project: str) -> list[Routine]:
+        """The routines an event of this kind in this project starts."""
+        return [r for r in self.ordered() if r.schedule.fires_on(kind, project)]
+
     def to_list(self) -> list[dict]:
         return [r.to_dict() for r in self.items]
 
     @classmethod
     def from_list(cls, rows) -> Routines:
         return cls([Routine.from_dict(x) for x in rows or [] if isinstance(x, dict)])
+
+
+# ---- runs on an event
+
+# the {name} braces of the arguments → the environment variables a run gets
+ARG_NAMES = {"event": "DAYKEEPER_EVENT", "source": "DAYKEEPER_SOURCE", "ref": "DAYKEEPER_REF", "url": "DAYKEEPER_URL",
+             "title": "DAYKEEPER_TITLE", "project": "DAYKEEPER_PROJECT", "text": "DAYKEEPER_TEXT"}
+
+
+def event_project(ev: Event) -> str:
+    """The project of an event: from its args, else from the reference
+    (“group/repo!12”, “group/repo@main”); "" for a source without projects."""
+    project = ev.args.get("project") if isinstance(ev.args, dict) else None
+    if isinstance(project, str) and project:
+        return project
+    for mark in ("!", "@"):
+        if mark in ev.mr:
+            return ev.mr.rsplit(mark, 1)[0]
+    return ""
+
+
+def event_context(ev: Event, translate=lambda text: text) -> dict[str, str]:
+    """The DAYKEEPER_* values a routine started by `ev` gets. The text is as in the feed:
+    `translate` is the UI translator, the args are filled in."""
+    try:
+        text = translate(ev.text).format(**ev.args)
+    except (KeyError, IndexError, ValueError, AttributeError):
+        text = ev.text
+    values = {"event": ev.kind, "source": ev.source, "ref": ev.mr, "url": ev.url, "title": ev.title, "project": event_project(ev), "text": text}
+    return {ARG_NAMES[k]: str(v) for k, v in values.items()}
+
+
+def quote_arg(value: str, platform: str = sys.platform) -> str:
+    """`value` written so that `split_args` gives it back as one argument: a title with
+    spaces or quotes from someone else's MR stays one argument and adds no others."""
+    if platform != "win32":
+        return shlex.quote(value)
+    return '"' + value.replace('"', "'") + '"'
+
+
+def fill_args(args: str, context: dict[str, str], quote=None) -> str:
+    """{event}, {ref}, {url}, {title}, {project}, {source}, {text} in the arguments → the
+    values of `context` (event_context); any other brace stays as typed. `quote` — how a
+    value is written (quote_arg for a script; None — as it is)."""
+
+    def put(m: re.Match) -> str:
+        var = ARG_NAMES.get(m.group(1))
+        if var is None or var not in context:
+            return m.group(0)
+        return quote(context[var]) if quote else context[var]
+
+    return re.sub(r"\{(\w+)\}", put, args)
+
+
+def event_runs(routines: Routines, events: list[Event], limit: int = EVENT_RUNS_MAX) -> tuple[list[tuple[Routine, Event]], int]:
+    """What the events of one check start: one run of each matching routine per event, in
+    the order of the events, at most `limit`; the second number is how many were skipped."""
+    runs = [(r, ev) for ev in events for r in routines.for_event(ev.kind, event_project(ev))]
+    return runs[:limit], max(0, len(runs) - limit)
 
 
 # ---- the accepted script

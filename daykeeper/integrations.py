@@ -1,5 +1,5 @@
 """Integrations kept in the vault (key `integrations`): GitLab settings, the last snapshot
-of my merge requests and the feed of notifications. Pure (no tkinter, no network)."""
+of my merge requests, the last look at the watched branches and the feed of notifications. Pure (no tkinter, no network)."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ class Integrations:
     gitlab_synced: float = 0.0  # when the last check that worked began: a light one looks back to it
     gitlab_full: float = 0.0  # when the last full check began
     gitlab_projects: list[str] = field(default_factory=list)  # the projects with my open MRs, watched or not
+    gitlab_pipelines: dict[str, dict] = field(default_factory=dict)  # watch key → its last pipeline and head; {} — none yet
     feed: list[Event] = field(default_factory=list)  # newest first
 
     def add_events(self, events: list[Event]) -> None:
@@ -40,6 +41,8 @@ class Integrations:
         self.gitlab.username = result.username
         first = not self.gitlab_state
         self.gitlab_state = result.snapshot
+        if result.pipelines is not None:
+            self.gitlab_pipelines = result.pipelines
         if result.events:
             self.add_events(result.events)
         return first
@@ -66,6 +69,7 @@ class Integrations:
             "gitlab_synced": self.gitlab_synced,
             "gitlab_full": self.gitlab_full,
             "gitlab_projects": list(self.gitlab_projects),
+            "gitlab_pipelines": self.gitlab_pipelines,
             "feed": [e.to_dict() for e in self.feed],
         }
 
@@ -74,6 +78,7 @@ class Integrations:
         if not isinstance(d, dict):
             return cls()
         state = d.get("gitlab_state")
+        pipes = d.get("gitlab_pipelines")
         return cls(
             gitlab=GitLabSettings.from_dict(d.get("gitlab")),
             gitlab_state=state if isinstance(state, dict) else {},
@@ -81,6 +86,7 @@ class Integrations:
             gitlab_synced=_number(d.get("gitlab_synced")),
             gitlab_full=_number(d.get("gitlab_full")),
             gitlab_projects=[x for x in projects if isinstance(x, str)] if isinstance(projects := d.get("gitlab_projects"), list) else [],
+            gitlab_pipelines={k: v for k, v in pipes.items() if isinstance(k, str) and isinstance(v, dict)} if isinstance(pipes, dict) else {},
             feed=[Event.from_dict(e) for e in d.get("feed", []) if isinstance(e, dict)][:FEED_KEEP],
         )
 

@@ -4,7 +4,11 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 
-from daykeeper.routines import Routine, Routines, Schedule, describe_schedule, interpreter_for, launch_plan, split_args, subtitle
+from daykeeper.gitlab import Event
+from daykeeper.routines import (
+    EVENT_RUNS_MAX, Routine, Routines, Schedule, describe_schedule, event_context, event_runs, fill_args, interpreter_for, launch_plan, quote_arg,
+    split_args, subtitle,
+)
 from daykeeper.vault import Vault
 
 WED_0930 = datetime(2026, 10, 14, 9, 30)  # a Wednesday
@@ -99,8 +103,71 @@ class RoutinesTest(unittest.TestCase):
             v.save()
             r = Vault.open(path, "master-pass-1").routines.items[0]
             self.assertEqual((r.name, r.kind, r.terminal, r.last_code), ("Pull", "command", True, 3))
-            self.assertEqual(r.schedule.to_dict(), {"on_unlock": True, "at": "08:45", "days": [0, 2]})
+            self.assertEqual(r.schedule.to_dict(), {"on_unlock": True, "at": "08:45", "days": [0, 2], "on_events": [], "projects": []})
         self.assertEqual(Routine.from_dict({"kind": "evil"}).kind, "script")
+
+
+
+MERGED = Event("merged", "group/repo!12", "Fix the login", "https://gitlab.example.com/group/repo/-/merge_requests/12", "{mr} was merged", {"mr": "group/repo!12"})
+
+
+class EventRoutinesTest(unittest.TestCase):
+    def test_for_event_with_a_project_filter(self):
+        rs = Routines()
+        any_project = rs.add(name="any", target="x", schedule=Schedule(on_events=["merged"]))
+        only_other = rs.add(name="other", target="x", schedule=Schedule(on_events=["merged", "watch_failed"], projects=["group/other"]))
+        rs.add(name="plain", target="x", schedule=Schedule(at="09:00"))
+        self.assertEqual(rs.for_event("merged", "group/repo"), [any_project])
+        self.assertEqual(rs.for_event("merged", "group/other"), [any_project, only_other])
+        self.assertEqual(rs.for_event("watch_failed", "group/other"), [only_other])
+        self.assertEqual(rs.for_event("approved", "group/repo"), [])
+
+    def test_schedule_round_trip_and_old_data(self):
+        s = Schedule(on_events=["merged"], projects=["group/repo"])
+        self.assertEqual(Schedule.from_dict(s.to_dict()), s)
+        old = Schedule.from_dict({"on_unlock": True, "at": "08:45", "days": [0]})
+        self.assertEqual((old.on_events, old.projects), ([], []))
+        self.assertEqual(Schedule.from_dict({"on_events": ["merged", 3, "", "merged"], "projects": "group/repo"}).to_dict()["on_events"], ["merged"])
+        self.assertEqual(Schedule.from_dict({"projects": "group/repo"}).projects, [])
+
+    def test_event_context(self):
+        ctx = event_context(MERGED)
+        self.assertEqual(ctx, {
+            "DAYKEEPER_EVENT": "merged", "DAYKEEPER_SOURCE": "gitlab", "DAYKEEPER_REF": "group/repo!12",
+            "DAYKEEPER_URL": "https://gitlab.example.com/group/repo/-/merge_requests/12", "DAYKEEPER_TITLE": "Fix the login",
+            "DAYKEEPER_PROJECT": "group/repo", "DAYKEEPER_TEXT": "group/repo!12 was merged",
+        })
+        self.assertEqual(event_context(MERGED, translate=lambda t: "Смержен {mr}")["DAYKEEPER_TEXT"], "Смержен group/repo!12")
+        branch = Event("branch_commits", "group/repo@release/1.2", "t", "", "{missing} text", {})
+        self.assertEqual((event_context(branch)["DAYKEEPER_PROJECT"], event_context(branch)["DAYKEEPER_TEXT"]), ("group/repo", "{missing} text"))
+        jira = Event("assigned", "KEY-1", "t", "", "x", source="jira")
+        self.assertEqual((event_context(jira)["DAYKEEPER_PROJECT"], event_context(jira)["DAYKEEPER_SOURCE"]), ("", "jira"))
+
+    def test_fill_args_leaves_an_unknown_brace(self):
+        ctx = event_context(MERGED)
+        self.assertEqual(fill_args("--ref {ref} --url={url} {unknown} {} {{x}}", ctx), "--ref group/repo!12 --url=https://gitlab.example.com/group/repo/-/merge_requests/12 {unknown} {} {{x}}")
+        self.assertEqual(fill_args("{event} {project}", {}), "{event} {project}")
+
+    def test_a_quoted_value_stays_one_argument(self):
+        ctx = {"DAYKEEPER_TITLE": 'Fix "the" login & more; rm -rf x'}
+        for platform in ("win32", "linux"):
+            args = fill_args("--title {title} --x", ctx, quote=lambda v, p=platform: quote_arg(v, p))
+            parts = split_args(args, platform)
+            self.assertEqual(len(parts), 3, (platform, parts))
+            self.assertEqual(parts[0], "--title")
+        self.assertEqual(split_args(fill_args("{title}", ctx, quote=lambda v: quote_arg(v, "linux")), "linux"), [ctx["DAYKEEPER_TITLE"]])
+
+    def test_the_storm_limit(self):
+        rs = Routines()
+        a = rs.add(name="a", target="x", schedule=Schedule(on_events=["merged"]))
+        b = rs.add(name="b", target="x", schedule=Schedule(on_events=["merged"], projects=["group/repo"]))
+        events = [Event("merged", f"group/repo!{i}", "t", "", "x") for i in range(4)]
+        runs, skipped = event_runs(rs, events)
+        self.assertEqual(len(runs), EVENT_RUNS_MAX)
+        self.assertEqual(skipped, 8 - EVENT_RUNS_MAX)
+        self.assertEqual(runs[:3], [(a, events[0]), (b, events[0]), (a, events[1])], "one run of each routine per event, in order")
+        self.assertEqual(event_runs(rs, events[:1]), ([(a, events[0]), (b, events[0])], 0))
+        self.assertEqual(event_runs(rs, [Event("approved", "group/repo!1", "t", "", "x")]), ([], 0))
 
 
 if __name__ == "__main__":

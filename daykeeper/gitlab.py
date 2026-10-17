@@ -6,8 +6,9 @@ author or a reviewer. `diff_snapshots` compares two snapshots and returns events
 rules that are switched on. Between full checks only what may have changed is asked for:
 approvals and pipelines once a project, threads only where the count of notes moved. The
 `updated_at` of an MR is no help here: an approval, a finished pipeline or a resolved
-thread leaves it as it was. The client is the only part that touches the network; the
-rest is pure and unit-tested.
+thread leaves it as it was. Watched branches (`PipelineWatch`) cost a request a rule kind
+on every check: their newest finished pipeline and the commits since the last head seen.
+The client is the only part that touches the network; the rest is pure and unit-tested.
 """
 
 from __future__ import annotations
@@ -30,6 +31,16 @@ RULES: dict[str, tuple[str, bool]] = {
     "my_threads_resolved": ("My threads were resolved in an MR I review", True),
     "replies": ("Someone replied in my threads in an MR I review", True),
 }
+# Rules about the watched branches (PipelineWatch rows), not my MRs: kept apart so the MR
+# rules block of the settings lists only its own; `ALL_RULES` is what a setting may hold.
+WATCH_RULES: dict[str, tuple[str, bool]] = {
+    "watch_failed": ("A watched pipeline failed", True),
+    "watch_fixed": ("A watched pipeline is green again", False),
+    "branch_commits": ("New commits on a watched branch", False),
+}
+ALL_RULES = RULES | WATCH_RULES
+PIPELINE_SOURCES = ("", "schedule", "push")  # "" — a pipeline from any source
+FINISHED = ("success", "failed", "canceled")  # a pipeline with an outcome; running ones are skipped
 INTERVALS = (2, 5, 10, 15, 30, 60)  # minutes between checks
 FULL_EVERY = 3600  # s; a full check asks about every MR again, whatever the light ones saw
 SINCE_MARGIN = 600  # s; a light check looks this far before the last one (clocks, a slow check)
@@ -81,26 +92,58 @@ class GitLabError(Exception):
 
 
 @dataclass
+class PipelineWatch:
+    """A branch (or a tag) whose newest pipeline and new commits are watched."""
+
+    project: str  # group/repo
+    ref: str  # a branch or a tag
+    source: str = ""  # "schedule" | "push" | "" — any
+    name: str = ""  # how the feed calls it; "project · ref" when empty
+
+    def key(self) -> str:
+        """The state key: “group/repo@main”, with “:schedule” when only one source counts."""
+        return f"{self.project}@{self.ref}" + (f":{self.source}" if self.source else "")
+
+    def label(self) -> str:
+        return self.name.strip() or f"{self.project} · {self.ref}"
+
+    def to_dict(self) -> dict:
+        return {"project": self.project, "ref": self.ref, "source": self.source, "name": self.name}
+
+    @classmethod
+    def from_dict(cls, d) -> PipelineWatch | None:
+        """None for a row without a project or a ref."""
+        if not isinstance(d, dict):
+            return None
+        project, ref = str(d.get("project", "")).strip().strip("/"), str(d.get("ref", "")).strip()
+        if not project or not ref:
+            return None
+        source = str(d.get("source", ""))
+        return cls(project, ref, source if source in PIPELINE_SOURCES else "", str(d.get("name", "")))
+
+
+@dataclass
 class GitLabSettings:
     url: str = ""  # e.g. https://gitlab.example.com
     entry_id: str = ""  # vault entry whose secret field holds the token
     interval_min: int = 5
-    rules: dict[str, bool] = field(default_factory=lambda: {k: on for k, (_l, on) in RULES.items()})
+    rules: dict[str, bool] = field(default_factory=lambda: {k: on for k, (_l, on) in ALL_RULES.items()})
     enabled: bool = False
     username: str = ""  # filled by “Check connection”
     projects: list[str] = field(default_factory=list)  # paths of the watched projects; [] — all
+    pipelines: list[PipelineWatch] = field(default_factory=list)  # branches watched for pipelines and commits
 
     def watches(self, project: str) -> bool:
         return not self.projects or project in self.projects
 
     def rule(self, code: str) -> bool:
-        return self.rules.get(code, RULES[code][1])
+        return self.rules.get(code, ALL_RULES[code][1])
 
     def to_dict(self) -> dict:
         return {
             "url": self.url, "entry_id": self.entry_id, "interval_min": self.interval_min,
             "rules": dict(self.rules), "enabled": self.enabled, "username": self.username,
-            "projects": list(self.projects),
+            "projects": list(self.projects), "pipelines": [w.to_dict() for w in self.pipelines],
         }
 
     @classmethod
@@ -108,37 +151,40 @@ class GitLabSettings:
         if not isinstance(d, dict):
             return cls()
         interval = d.get("interval_min", 5)
-        rules = {k: bool(v) for k, v in (d.get("rules") or {}).items() if k in RULES}
+        rules = {k: bool(v) for k, v in (d.get("rules") or {}).items() if k in ALL_RULES}
         return cls(
             url=str(d.get("url", "")).strip().rstrip("/"),
             entry_id=str(d.get("entry_id", "")),
             interval_min=interval if interval in INTERVALS else 5,
-            rules={k: rules.get(k, on) for k, (_l, on) in RULES.items()},
+            rules={k: rules.get(k, on) for k, (_l, on) in ALL_RULES.items()},
             enabled=bool(d.get("enabled", False)),
             username=str(d.get("username", "")),
             projects=[x for x in projects if isinstance(x, str) and x] if isinstance(projects := d.get("projects"), list) else [],
+            pipelines=[w for w in map(PipelineWatch.from_dict, pipes) if w] if isinstance(pipes := d.get("pipelines"), list) else [],
         )
 
 
 @dataclass
 class Event:
-    kind: str  # a RULES code
-    mr: str  # "group/repo!12"
+    kind: str  # an ALL_RULES code (another source: its own)
+    mr: str  # the reference of any source: "group/repo!12", "group/repo@main"
     title: str
     url: str
     text: str  # what happened, in English UI keys formatted by the caller
     args: dict = field(default_factory=dict)
     ts: float = field(default_factory=time.time)
     read: bool = False
+    source: str = "gitlab"  # which integration raised it
 
     def to_dict(self) -> dict:
-        return {"kind": self.kind, "mr": self.mr, "title": self.title, "url": self.url, "text": self.text, "args": self.args, "ts": self.ts, "read": self.read}
+        return {"kind": self.kind, "mr": self.mr, "title": self.title, "url": self.url, "text": self.text, "args": self.args, "ts": self.ts, "read": self.read, "source": self.source}
 
     @classmethod
     def from_dict(cls, d: dict) -> Event:
         return cls(
             kind=str(d.get("kind", "")), mr=str(d.get("mr", "")), title=str(d.get("title", "")), url=web_url(d.get("url")),
             text=str(d.get("text", "")), args=dict(d["args"]) if isinstance(d.get("args"), dict) else {}, ts=number(float, d.get("ts"), None) or time.time(), read=bool(d.get("read", False)),
+            source=str(d.get("source") or "gitlab"),
         )
 
 
@@ -464,6 +510,135 @@ def diff_snapshots(old: dict[str, dict], new: dict[str, dict], rules: GitLabSett
     return events
 
 
+# ---- watched branches: their newest pipeline and new commits
+
+
+def project_path(project: str) -> str:
+    """“group/repo” → “group%2Frepo”: the API takes a project by its URL-encoded path."""
+    return urllib.parse.quote(project, safe="")
+
+
+def _row_failed(exc: GitLabError) -> bool:
+    """A watch row the server does not know (a typo, a removed branch) spoils only that
+    row; a bad token or a dead server stops the whole check."""
+    msg = str(exc)
+    return msg.startswith("HTTP ")
+
+
+_PIPE_FACTS = ("status", "id", "url", "finished_at", "sha")
+
+
+def _watch_pipelines(client: GitLabClient, watches: list[PipelineWatch], old: dict[str, dict]) -> dict[str, dict]:
+    """key → {status, id, url, finished_at, sha} of the newest pipeline with an outcome:
+    one request a watch for its few newest pipelines; a running one is skipped, so
+    “failed → running → success” is seen as green again. A row that fails keeps its old
+    facts and says why under "error"."""
+    out: dict[str, dict] = {}
+    for w in watches:
+        before = old.get(w.key(), {})
+        kept = {k: before[k] for k in _PIPE_FACTS if k in before}
+        try:
+            pipes = client.get(f"/projects/{project_path(w.project)}/pipelines", ref=w.ref, source=w.source or None, per_page=5)
+        except GitLabError as exc:
+            if not _row_failed(exc):
+                raise
+            out[w.key()] = kept | {"error": str(exc)}
+            continue
+        done = [p for p in pipes if isinstance(p, dict) and p.get("status") in FINISHED] if isinstance(pipes, list) else []
+        if not done:
+            out[w.key()] = kept
+            continue
+        newest = max(done, key=lambda p: number(int, p.get("id"), 0))
+        out[w.key()] = {
+            "status": str(newest.get("status", "")), "id": number(int, newest.get("id"), 0), "url": web_url(newest.get("web_url")),
+            "finished_at": str(newest.get("finished_at") or newest.get("updated_at") or ""), "sha": str(newest.get("sha", "")),
+        }
+    return out
+
+
+def _is_me(commit: dict, me: dict) -> bool:
+    """A commit has no username, only the name and the e-mail written into it."""
+    emails = {str(me.get(k) or "").lower() for k in ("email", "commit_email", "public_email")} - {""}
+    if str(commit.get("author_email") or "").lower() in emails:
+        return True
+    return bool(me.get("name")) and commit.get("author_name") == me.get("name")
+
+
+def _branch_commits(client: GitLabClient, watches: list[PipelineWatch], old: dict[str, dict], me: dict) -> dict[str, dict]:
+    """key → {head, head_at, new_commits, author, commit_url, commit_title}: the commits
+    pushed since the head seen last time, mine left out. One request a watch; the first
+    look only remembers the head."""
+    out: dict[str, dict] = {}
+    for w in watches:
+        before = old.get(w.key(), {})
+        head, head_at = before.get("head"), str(before.get("head_at") or "")
+        try:
+            got = client.get(f"/projects/{project_path(w.project)}/repository/commits", ref_name=w.ref, since=head_at or None, per_page=100)
+        except GitLabError as exc:
+            if not _row_failed(exc):
+                raise
+            out[w.key()] = {"head": head, "head_at": head_at, "new_commits": 0, "error": str(exc)}
+            continue
+        commits = [c for c in got if isinstance(c, dict) and c.get("id")] if isinstance(got, list) else []
+        fresh: list[dict] = []
+        if head:  # newest first: everything above the old head is new
+            for c in commits:
+                if c["id"] == head:
+                    break
+                fresh.append(c)
+        others = [c for c in fresh if not _is_me(c, me)]
+        facts: dict[str, Any] = {
+            "head": commits[0]["id"] if commits else head,
+            "head_at": str(commits[0].get("committed_date") or head_at) if commits else head_at,
+            "new_commits": len(others),
+        }
+        if others:
+            facts |= {"author": str(others[0].get("author_name", "")), "commit_url": web_url(others[0].get("web_url")), "commit_title": str(others[0].get("title", ""))}
+        out[w.key()] = facts
+    return out
+
+
+def take_pipelines(client: GitLabClient, me: dict, settings: GitLabSettings, old: dict[str, dict]) -> dict[str, dict]:
+    """The facts of every watched branch, asking only for what the switched-on rules need."""
+    watches = settings.pipelines
+    state: dict[str, dict] = {w.key(): {"project": w.project, "ref": w.ref, "name": w.label()} for w in watches}
+    if settings.rule("watch_failed") or settings.rule("watch_fixed"):
+        for key, facts in _watch_pipelines(client, watches, old).items():
+            state[key].update(facts)
+    if settings.rule("branch_commits"):
+        for key, facts in _branch_commits(client, watches, old, me).items():
+            error = state[key].get("error") or facts.pop("error", None)
+            state[key].update(facts)
+            if error:
+                state[key]["error"] = error
+    return state
+
+
+def diff_pipelines(old: dict[str, dict], new: dict[str, dict], rules: GitLabSettings) -> list[Event]:
+    """Events between two looks at the watched branches. A row seen for the first time is
+    the baseline; a failed pipeline is news once, the same one failed again is not."""
+    events: list[Event] = []
+
+    def add(kind: str, facts: dict, url: str, text: str, **args) -> None:
+        if rules.rule(kind):
+            ref = f"{facts.get('project', '')}@{facts.get('ref', '')}"
+            name = facts.get("name") or ref
+            events.append(Event(kind, ref, name, url, text, {"name": name, "project": facts.get("project", ""), **args}))
+
+    for key, now in new.items():
+        before = old.get(key)
+        if before is None:
+            continue
+        status, was = now.get("status"), before.get("status")
+        if status == "failed" and (now.get("id") != before.get("id") or was != "failed"):
+            add("watch_failed", now, now.get("url", ""), "The pipeline failed on {name}")
+        if status == "success" and was == "failed":
+            add("watch_fixed", now, now.get("url", ""), "{name} is green again")
+        if now.get("new_commits", 0) > 0 and before.get("head"):
+            add("branch_commits", now, now.get("commit_url", ""), "{n} new commits on {name}, the last by {author}", n=now["new_commits"], author=now.get("author", ""))
+    return events
+
+
 @dataclass
 class CheckResult:
     """What one check brought back: who I am, the new snapshot, the events since the old one."""
@@ -474,13 +649,17 @@ class CheckResult:
     projects: list[str] = field(default_factory=list)  # all the projects with my open MRs
     started: float = 0.0  # when the check began: the next light one looks back from here
     full: bool = True
+    pipelines: dict[str, dict] | None = None  # the watched branches; None — not looked at this time
 
 
-def check(url: str, token: str, settings: GitLabSettings, old: dict[str, dict], fetch=None, since: float = 0.0) -> CheckResult:
+def check(url: str, token: str, settings: GitLabSettings, old: dict[str, dict], fetch=None, since: float = 0.0,
+          pipelines: dict[str, dict] | None = None) -> CheckResult:
     """One whole check against the server (meant for a background thread): me, the
     snapshot, the events against `old` — none when `old` is empty, the first look is the
     baseline. `since` — the start of the last check for a light one, 0 for a full one.
-    Raises GitLabError when the server cannot be reached or refuses."""
+    `pipelines` — the last facts of the watched branches; None leaves them out. Light or
+    full, each watch costs a request a rule kind. Raises GitLabError when the server cannot
+    be reached or refuses."""
     started = time.time()
     since = since if old else 0.0
     client = GitLabClient(url, token, fetch=fetch)
@@ -491,6 +670,10 @@ def check(url: str, token: str, settings: GitLabSettings, old: dict[str, dict], 
         # an MR of a project no longer watched is not asked about: it did not close
         gone = {k: v for k, v in old.items() if k not in new and settings.watches(project_of(k))}
         events = diff_snapshots(old, new, settings, closed_states(client, gone)) if old else []
-        return CheckResult(str(me.get("username", "")), new, events, sorted(seen), started, full=since <= 0)
+        watched = None
+        if pipelines is not None:
+            watched = take_pipelines(client, me, settings, pipelines)
+            events += diff_pipelines(pipelines, watched, settings)
+        return CheckResult(str(me.get("username", "")), new, events, sorted(seen), started, full=since <= 0, pipelines=watched)
     finally:
         client.close()

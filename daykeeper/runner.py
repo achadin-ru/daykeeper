@@ -35,9 +35,10 @@ def decode_line(raw: bytes) -> str:
 
 class Run:
     """One run of a routine in a background thread; lines and the end come through a
-    queue as ("line", text) and ("end", exit code). `auto` — started by the schedule."""
+    queue as ("line", text) and ("end", exit code). `auto` — started by the schedule.
+    `env` — variables added over the current environment (an event's DAYKEEPER_* values)."""
 
-    def __init__(self, routine: Any, argv: list[str] | None, shell: str, cwd: str, auto: bool = False):
+    def __init__(self, routine: Any, argv: list[str] | None, shell: str, cwd: str, auto: bool = False, env: dict[str, str] | None = None):
         self.routine = routine
         self.auto = auto
         self.started = time.time()
@@ -45,7 +46,7 @@ class Run:
         self.code: int | None = None
         self.lines: list[str] = []
         self.queue: queue.Queue = queue.Queue()
-        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+        child_env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1") | (env or {})
         flags = CREATE_NO_WINDOW if sys.platform == "win32" else 0
         self.proc: subprocess.Popen[bytes] | None
         try:
@@ -56,7 +57,7 @@ class Run:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
-                env=env,
+                env=child_env,
                 creationflags=flags,
                 start_new_session=sys.platform != "win32",  # its own group: Stop ends the children too
             )
