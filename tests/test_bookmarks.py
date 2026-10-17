@@ -36,6 +36,19 @@ class EntryCredentialsTest(unittest.TestCase):
         self.assertEqual((entry_login(e), entry_secret(e), entry_url(e)), ("", "abc", ""))
 
 
+    def test_the_address_and_login_never_unseal_a_secret_field(self):
+        """Looking for the site or the login of an entry must not open its password."""
+
+        class Refusing:
+            def open(self, sealed: bytes) -> str:
+                raise AssertionError("a secret field was unsealed")
+
+        e = login_entry()
+        secret = next(f for f in e.fields if f.secret)
+        secret._sealed, secret._plain, secret._sealer = b"sealed", "", Refusing()  # type: ignore[assignment]
+        self.assertEqual((entry_login(e), entry_url(e)), ("me", "https://gitlab.example.com"))
+
+
 class BookmarksTest(unittest.TestCase):
     def test_add_groups_order_and_move(self):
         bms = Bookmarks()

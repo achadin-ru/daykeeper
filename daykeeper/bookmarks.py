@@ -100,8 +100,10 @@ def entry_secret(entry) -> str:
 def entry_url(entry) -> str:
     """An address kept in a vault entry, if any."""
     for f in entry.fields:
+        if f.secret:
+            continue  # reading the value would unseal a password only to throw it away
         value = f.value.strip()
-        if not f.secret and value and (_key_in(f.key, URL_KEYS) or value.startswith(("http://", "https://"))):
+        if value and (_key_in(f.key, URL_KEYS) or value.startswith(("http://", "https://"))):
             return value
     return ""
 
