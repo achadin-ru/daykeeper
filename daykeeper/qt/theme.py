@@ -355,6 +355,9 @@ def make_style():
     from PySide6.QtGui import QPainterPath, QPen
     from PySide6.QtWidgets import QProxyStyle, QStyle, QStyleFactory
 
+    from .errors import guard_events
+
+    @guard_events
     class Style(QProxyStyle):
         def pixelMetric(self, metric, option=None, widget=None):  # noqa: N802 — Qt's name
             if metric in (QStyle.PixelMetric.PM_IndicatorWidth, QStyle.PixelMetric.PM_IndicatorHeight, QStyle.PixelMetric.PM_ExclusiveIndicatorWidth, QStyle.PixelMetric.PM_ExclusiveIndicatorHeight):

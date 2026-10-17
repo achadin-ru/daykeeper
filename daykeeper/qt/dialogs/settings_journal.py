@@ -127,6 +127,7 @@ class ListBox(QWidget):
                 r.set_compact(compact)
 
 
+@guard_events
 class JournalSection(QWidget):
     def __init__(self, win: Any):
         from .settings import Section

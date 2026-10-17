@@ -147,6 +147,24 @@ class QtFullSmokeTest(unittest.TestCase):
         btn = bar.tab_buttons["vault"]
         self.assertEqual((btn.text(), btn.toolButtonStyle()), ("", Qt.ToolButtonStyle.ToolButtonIconOnly))
 
+    def test_a_lock_asked_again_while_the_save_question_waits_is_nothing(self):
+        """The conflict question runs its own loop; the idle tick fires meanwhile and calls
+        lock() again — that second call must not ask again nor half-lock under the dialog."""
+        win = self.win
+        calls = []
+        real = win._save_or_keep_copy
+
+        def asking() -> None:
+            calls.append(1)
+            win.lock()  # what the idle ticker does while the question is open
+            self.assertIsNotNone(win.vault, "nothing locked under the open question")
+            real()
+
+        win._save_or_keep_copy = asking  # type: ignore[method-assign]
+        win.lock()
+        self.assertEqual(len(calls), 1)
+        self.assertIsNone(win.vault)
+
     def test_tab_shortcuts(self):
         win = self.win
         win.show_tab_number(4)

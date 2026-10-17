@@ -7,12 +7,14 @@ from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QListWidget, QListWidgetItem, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QWidget
 
 from .. import icons, theme
+from ..errors import guard_events
 
 COUNT_ROLE = Qt.ItemDataRole.UserRole + 1
 KEY_ROLE = Qt.ItemDataRole.UserRole + 2
 ROW_ICON = theme.px(15)  # px, the drawn icon of a row whose text starts with a glyph
 
 
+@guard_events
 class CountDelegate(QStyledItemDelegate):
     """A sidebar row with a count at its right edge (groups, days)."""
 

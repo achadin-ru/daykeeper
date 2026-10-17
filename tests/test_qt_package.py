@@ -49,15 +49,24 @@ class QtBorderTest(unittest.TestCase):
 
 
     def test_every_event_handler_is_guarded(self):
-        """An error escaping an event handler can end the process (daykeeper/qt/errors.py):
-        every class of the package that defines one carries @guard_events."""
+        """An error escaping an event handler, or a virtual Qt calls back synchronously, can
+        end the process (daykeeper/qt/errors.py): every class of the package that defines
+        one carries @guard_events."""
         events = {"event", "eventFilter", "paintEvent", "resizeEvent", "moveEvent", "showEvent", "hideEvent", "closeEvent", "changeEvent",
                   "mousePressEvent", "mouseReleaseEvent", "mouseMoveEvent", "mouseDoubleClickEvent", "wheelEvent", "enterEvent", "leaveEvent",
                   "keyPressEvent", "keyReleaseEvent", "focusInEvent", "focusOutEvent", "focusNextPrevChild", "contextMenuEvent"}
+        # the virtuals Qt calls back while our code waits (a layout's size hints, a delegate's
+        # paint, a model's data): checked on classes that derive from a Qt class
+        sync = {"sizeHint", "minimumSizeHint", "minimumSize", "heightForWidth", "hasHeightForWidth", "paint", "drawPrimitive",
+                "setGeometry", "data", "rowCount", "pixelMetric", "pixmap", "scaledPixmap"}
         bad = []
         for path in QT.rglob("*.py"):
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-                handles = isinstance(node, ast.ClassDef) and any(isinstance(b, ast.FunctionDef) and b.name in events for b in node.body)
+                if not isinstance(node, ast.ClassDef):
+                    continue
+                qt_base = any(isinstance(b, ast.Name) and b.id.startswith("Q") for b in node.bases)
+                names = {b.name for b in node.body if isinstance(b, ast.FunctionDef)}
+                handles = bool(names & events) or (qt_base and bool(names & sync))
                 if handles and not any(isinstance(d, ast.Name) and d.id == "guard_events" for d in node.decorator_list):  # type: ignore[attr-defined]
                     bad.append(f"{path.name}:{node.name}")  # type: ignore[attr-defined]
         self.assertEqual(bad, [])

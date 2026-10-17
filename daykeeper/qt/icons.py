@@ -18,6 +18,7 @@ from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QIconEngine, QPainter, QPainterPath, QPen, QPixmap
 
 from . import theme
+from .errors import guard_events
 
 Draw = Callable[[QPainter, QRectF], None]
 Colour = Callable[[], str]
@@ -697,6 +698,7 @@ def _picture(name: str, rgba: int, px: int, ratio: float) -> QPixmap:
     return pm
 
 
+@guard_events
 class _Engine(QIconEngine):
     def __init__(self, draw: Draw, colour: Colour, active: Colour | None = None, disabled: Colour | None = None, checked: Colour | None = None):
         super().__init__()

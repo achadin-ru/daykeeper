@@ -408,6 +408,27 @@ print("survived", seen, flush=True)
 """
 
 
+SIZE_CHILD = """
+import os, sys
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+sys.path.insert(0, r"{root}")
+from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+from daykeeper.qt.errors import guard_events
+app = QApplication([])
+seen = []
+sys.excepthook = lambda t, e, tb: seen.append(t.__name__)
+@guard_events
+class Bad(QLabel):
+    def sizeHint(self):
+        raise ValueError("boom")
+host = QWidget()
+QVBoxLayout(host).addWidget(Bad("x"))
+host.show()
+host.adjustSize()
+print("survived", seen, flush=True)
+"""
+
+
 class GuardEventsTest(unittest.TestCase):
     """The reason for errors.guard_events, shown in a child process (it may end)."""
 
@@ -426,6 +447,18 @@ class GuardEventsTest(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("slot went on", out)
         self.assertIn("survived ['ValueError'", out, "the error reached the hook")
+
+    def test_a_guarded_size_hint_keeps_it_alive_too(self):
+        """A size hint asked by a layout while show() runs is the second kind (errors.SYNC_METHODS)."""
+        import os
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        code = SIZE_CHILD.format(root=str(Path(__file__).resolve().parents[2]))
+        done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60, env=dict(os.environ))  # noqa: S603
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn("survived ['ValueError'", done.stdout)
 
     def test_an_unguarded_one_ends_it(self):
         """If Qt for Python changes this, the guard may go: the test says so."""

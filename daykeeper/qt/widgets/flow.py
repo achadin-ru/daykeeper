@@ -7,7 +7,10 @@ from __future__ import annotations
 from PySide6.QtCore import QMargins, QPoint, QRect, QSize, Qt
 from PySide6.QtWidgets import QLayout, QLayoutItem, QSizePolicy, QWidget
 
+from ..errors import guard_events
 
+
+@guard_events
 class FlowLayout(QLayout):
     def __init__(self, parent: QWidget | None = None, spacing: int = 8, line_spacing: int | None = None, margins: int = 0):
         super().__init__(parent)

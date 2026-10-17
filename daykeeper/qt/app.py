@@ -265,6 +265,7 @@ class MainWindow(QMainWindow):
         self._inbox_watch = QFileSystemWatcher(self)
         self._children: weakref.WeakSet[QWidget] = weakref.WeakSet()  # windows that close on lock
         self._conflict_told = False
+        self._locking = False
         self._error_told = 0.0
         self._captioned = False
         self._settings_win: Any = None
@@ -448,10 +449,16 @@ class MainWindow(QMainWindow):
     def lock(self) -> None:
         """Save, close every window that shows the vault, forget the vault and the undo steps,
         show the unlock screen (Ctrl+L, idle, minimize, too many wrong codes)."""
+        if self.vault is None or self._locking:
+            return
+        self._locking = True  # the conflict question waits in its own loop: the idle tick must not ask again
+        try:
+            self._clip_wipe.flush()
+            self._save_or_keep_copy()
+        finally:
+            self._locking = False
         if self.vault is None:
             return
-        self._clip_wipe.flush()
-        self._save_or_keep_copy()
         self.close_settings()
         self.close_child_windows()
         self._capture.cancel()

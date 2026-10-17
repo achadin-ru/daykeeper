@@ -165,6 +165,7 @@ class GitLabWatcher:
             page.status_label.setText(text)
 
 
+@guard_events
 class EventDelegate(QStyledItemDelegate):
     """A notification: the icon, the text and the MR title wrapped, the time at the right;
     unread ones on the soft accent."""

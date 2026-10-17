@@ -75,6 +75,7 @@ def kind_icon(kind: str) -> str:
     return ENTRY_KIND_ICONS.get(kind, ENTRY_KIND_ICONS[DEFAULT_KIND])
 
 
+@guard_events
 class EntryModel(QAbstractListModel):
     """The entries the list shows, in their order. The right cell: icons of the filled
     fields, the kind while none is, or the list a search hit lives in."""
@@ -139,6 +140,7 @@ def parts_width(fm: QFontMetrics, parts: list[str]) -> list[int]:
     return [RIGHT_ICON if icons.name_of(p) else fm.horizontalAdvance(p) for p in parts]
 
 
+@guard_events
 class EntryDelegate(QStyledItemDelegate):
     """A row: the icon and the name on the left, the right cell muted at the right edge."""
 
