@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from tests.qt_helpers import qt_app  # noqa: E402  (sets the offscreen platform first)
+from tests.qt_helpers import pump, qt_app  # noqa: E402  (sets the offscreen platform first)
 
 PASSWORD = "bench-master-1"
 
@@ -97,7 +97,7 @@ def main() -> None:
         t = time.perf_counter()
         win.lock()  # saves the vault first, as a real lock does
         win.repaint()
-        QApplication.processEvents()
+        pump()
         switches_out.append(ms(time.perf_counter() - t))
         opened = Vault.open(vault, PASSWORD)
     results["unlock_to_main_ms"] = {"median": round(statistics.median(switches_in), 1), "max": max(switches_in)}

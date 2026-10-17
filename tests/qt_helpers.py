@@ -46,12 +46,16 @@ def qt_app():
 
 
 def pump(ms: int = 0) -> None:
-    """Run the event loop for about `ms` (at least once)."""
+    """Run the event loop for about `ms` (at least once), the deferred deletes too: the app's
+    own loop runs them, processEvents() alone does not, and widgets dropped with
+    deleteLater() would pile up (and slow everything that walks the widgets)."""
+    from PySide6.QtCore import QCoreApplication, QEvent
     from PySide6.QtWidgets import QApplication
 
     end = time.monotonic() + ms / 1000
     while True:
         QApplication.processEvents()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
         if time.monotonic() >= end:
             return
         time.sleep(0.002)
