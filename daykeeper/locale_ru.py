@@ -879,4 +879,8 @@ RU: dict[str, str] = {
     'The assistant answered with nothing': 'Помощник ничего не ответил',
     'GeckIt did not answer in {n} min': 'GeckIt не ответил за {n} мин',
     'GeckIt did not start it': 'GeckIt не запустил задание',
+    'Could not open the project folder:': 'Не удалось открыть папку проекта:',
+    'Not a known assistant: {name}': 'Неизвестный помощник: {name}',
+    'The project folder is not there: {path}': 'Папки проекта нет: {path}',
+    'Daykeeper could not read the answer: {error}': 'Daykeeper не смог прочитать ответ: {error}',
 }

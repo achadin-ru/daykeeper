@@ -21,7 +21,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .assistants import Assignment
+from .assistants import Assignment, GeckitInstall, geckit_env, plan_env
 from .i18n import _
 
 PATIENCE = 90.0  # seconds one quiet answer is waited on (GeckIt waits as long)
@@ -76,11 +76,11 @@ def parse_answer(out: str) -> Answer | None:
     out = out.strip()
     try:
         data: Any = json.loads(out)
-    except ValueError:
+    except (ValueError, RecursionError):  # RecursionError: nesting too deep to decode
         lines = [x for x in out.splitlines() if x.strip().startswith("{")]
         try:
             data = json.loads(lines[-1]) if lines else None
-        except ValueError:
+        except (ValueError, RecursionError):
             return None
     if isinstance(data, list):
         data = next((d for d in reversed(data) if isinstance(d, dict) and d.get("type") == "result"), None)
@@ -98,7 +98,8 @@ def parse_answer(out: str) -> Answer | None:
 
 class _ChildRun:
     """A child given `stdin`, read to the end by a thread within `timeout` seconds; then
-    `finish` fills the run in and `notify(self)` is called from that thread."""
+    `finish` fills the run in and `notify(self)` is called from that thread. `env` None —
+    this process's environment without the variables of OFF_PLAN, never all of it."""
 
     def __init__(self, argv: list[str], stdin: str, cwd: str | None, env: Mapping[str, str] | None,
                  timeout: float, notify: Callable[[Any], None] | None):
@@ -120,7 +121,7 @@ class _ChildRun:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                env=dict(env) if env is not None else None,
+                env=dict(env) if env is not None else plan_env(os.environ),
                 creationflags=_flags(),
                 start_new_session=sys.platform != "win32",  # its own group: a stop ends its children too
             )
@@ -149,8 +150,13 @@ class _ChildRun:
             out, err = b"", b""
             self.proc.wait()
         self.code = self.proc.returncode
-        self.finish(_decode(out), _decode(err)[-ERR_TAIL:])
-        self._done()
+        try:
+            self.finish(_decode(out), _decode(err)[-ERR_TAIL:])
+        except Exception as exc:  # noqa: BLE001 — the run must still end, notify and clean up
+            self.error = _("Daykeeper could not read the answer: {error}").format(error=exc)
+            self.failed()
+        finally:
+            self._done()
 
     def finish(self, out: str, err: str) -> None:
         raise NotImplementedError
@@ -261,7 +267,7 @@ def parse_geckit_answer(text: str) -> GeckitAnswer:
     text = text.strip()
     try:
         data = json.loads(text)
-    except ValueError:
+    except (ValueError, RecursionError):
         data = None
     if isinstance(data, dict) and isinstance(data.get("tasks"), list) and data["tasks"] and isinstance(data["tasks"][0], dict):
         task = data["tasks"][0]
@@ -288,13 +294,15 @@ def parse_geckit_answer(text: str) -> GeckitAnswer:
 
 class GeckitSend(_ChildRun):
     """`geckit start` in the background: GeckIt shows the request to the person and the
-    command waits for the answer, which `answer` holds once the run has ended."""
+    command waits for the answer, which `answer` holds once the run has ended. `env` None —
+    `geckit_env(install)`: without ELECTRON_RUN_AS_NODE GeckIt's program would open its
+    window instead of running the command."""
 
-    def __init__(self, assignment: Assignment, argv: list[str], env: Mapping[str, str] | None = None,
+    def __init__(self, assignment: Assignment, argv: list[str], install: GeckitInstall, env: Mapping[str, str] | None = None,
                  timeout: float = GECKIT_PATIENCE, notify: Callable[[Any], None] | None = None):
         self.assignment = assignment
         self.answer: GeckitAnswer | None = None
-        super().__init__(argv, "", None, env, timeout, notify)
+        super().__init__(argv, "", None, geckit_env(install) if env is None else env, timeout, notify)
 
     def failed(self) -> None:
         self.answer = GeckitAnswer("error", note=self.error)

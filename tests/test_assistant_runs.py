@@ -5,16 +5,46 @@ assistants are never started."""
 import json
 import os
 import sys
+import tempfile
 import threading
 import time
 import unittest
+from pathlib import Path
+from unittest import mock
 
 from daykeeper import assistant_runs as runs
-from daykeeper.assistants import Assignment
+from daykeeper.assistants import Assignment, GeckitInstall
+
+INSTALL = GeckitInstall("GeckIt.exe", "cli.js", "D:/data/geckit")
 
 
 def child(code: str) -> list[str]:
     return [sys.executable, "-c", code]
+
+
+def alive(pid: int) -> bool:
+    """Whether a process is still running, without touching it."""
+    if sys.platform == "win32":
+        import ctypes
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.restype = ctypes.c_void_p
+        handle = kernel.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            kernel.GetExitCodeProcess(ctypes.c_void_p(handle), ctypes.byref(code))
+            return code.value == 259  # STILL_ACTIVE
+        finally:
+            kernel.CloseHandle(ctypes.c_void_p(handle))
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def wait(run, timeout: float = 20.0) -> None:
@@ -79,20 +109,27 @@ class QuietRunTest(unittest.TestCase):
         self.assertEqual(run.error, "The assistant answered with nothing")
 
     def test_timeout_kills_the_process_tree(self):
-        code = (
-            "import subprocess, sys, time\n"
-            "kid = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
-            "print(kid.pid, flush=True)\n"
-            "time.sleep(60)\n"
-        )
-        started = time.monotonic()
-        run = runs.QuietRun(Assignment("custom", "t", "x"), child(code), timeout=1.5, notify=self.notify)
-        self.assertTrue(self.event.wait(30))
-        self.assertLess(time.monotonic() - started, 25)
-        self.assertTrue(run.timed_out)
-        self.assertFalse(run.ok)
-        self.assertEqual(run.error, "The assistant did not answer in 2 s")
-        self.assertIsNotNone(run.proc.poll())
+        with tempfile.TemporaryDirectory() as tmp:
+            pid_file = Path(tmp) / "grandchild.pid"
+            code = (
+                "import pathlib, subprocess, sys, time\n"
+                "kid = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+                f"pathlib.Path({str(pid_file)!r}).write_text(str(kid.pid))\n"
+                "time.sleep(60)\n"
+            )
+            started = time.monotonic()
+            run = runs.QuietRun(Assignment("custom", "t", "x"), child(code), timeout=3, notify=self.notify)
+            self.assertTrue(self.event.wait(30))
+            self.assertLess(time.monotonic() - started, 25)
+            self.assertTrue(run.timed_out)
+            self.assertFalse(run.ok)
+            self.assertEqual(run.error, "The assistant did not answer in 3 s")
+            self.assertIsNotNone(run.proc.poll())
+            grandchild = int(pid_file.read_text())
+            end = time.monotonic() + 10
+            while alive(grandchild) and time.monotonic() < end:
+                time.sleep(0.05)
+            self.assertFalse(alive(grandchild), "the grandchild outlived the timeout")
 
     def test_stop(self):
         run = runs.QuietRun(Assignment("custom", "t", "x"), child("import time; time.sleep(60)"), notify=self.notify)
@@ -108,6 +145,34 @@ class QuietRunTest(unittest.TestCase):
         self.assertEqual(run.code, -1)
         self.assertIn("no-such-program", run.error)
         self.assertEqual(len(self.done), 1)
+
+    def test_provider_keys_stay_in_the_parent_by_default(self):
+        code = "import json, os; print(json.dumps({'result': repr(os.environ.get('ANTHROPIC_API_KEY')) + ' ' + os.environ.get('DK_PLAIN', '')}))"
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "parent-only", "DK_PLAIN": "kept"}):
+            run = runs.QuietRun(Assignment("custom", "t", "x"), child(code), notify=self.notify)
+            self.assertTrue(self.event.wait(20))
+        wait(run)
+        self.assertEqual(run.text, "None kept")
+
+    def test_an_exception_in_finish_still_ends_the_run(self):
+        class Broken(runs.QuietRun):
+            def finish(self, out, err):
+                raise RuntimeError("bad answer")
+
+        run = Broken(Assignment("custom", "t", "x"), child("print('x')"), notify=self.notify)
+        self.assertTrue(self.event.wait(20))
+        self.assertFalse(run.running)
+        self.assertEqual(run.error, "Daykeeper could not read the answer: bad answer")
+        self.assertFalse(os.path.exists(run.scratch))
+
+    def test_deeply_nested_json_is_not_an_answer(self):
+        code = "import sys; sys.stdout.write('[' * 200000 + ']' * 200000)"
+        run = runs.QuietRun(Assignment("custom", "t", "x"), child(code), notify=self.notify)
+        self.assertTrue(self.event.wait(20))
+        self.assertFalse(run.running)
+        self.assertEqual(run.code, 0)  # it ran and answered; the answer is what is refused
+        self.assertTrue(run.error.endswith("]]]"), run.error[:80])
+        self.assertFalse(os.path.exists(run.scratch))
 
     def test_history_keeps_the_last_ones(self):
         pool = runs.QuietRuns(keep=2)
@@ -128,6 +193,14 @@ class ParseAnswerTest(unittest.TestCase):
         self.assertIsNone(runs.parse_answer('{"other": 1}'))
         odd = runs.parse_answer('{"result": 5, "total_cost_usd": "cheap", "duration_ms": true}')
         self.assertEqual((odd.text, odd.cost, odd.duration_ms), ("", None, None))
+
+    def test_deep_nesting(self):
+        deep = '{"a":' * 100_000 + "1" + "}" * 100_000
+        with self.assertRaises(RecursionError):
+            json.loads(deep)  # what the parser has to survive
+        self.assertIsNone(runs.parse_answer(deep))
+        self.assertIsNone(runs.parse_answer("noise\n" + deep))
+        self.assertEqual(runs.parse_geckit_answer(deep).state, "error")
 
 
 class GeckitAnswerTest(unittest.TestCase):
@@ -150,15 +223,25 @@ class GeckitAnswerTest(unittest.TestCase):
     def test_send_with_a_stand_in(self):
         done = threading.Event()
         code = "import json; print(json.dumps({'tasks': [{'task': 1, 'answer': 'queued', 'id': 'g7'}]}))"
-        send = runs.GeckitSend(Assignment("note_task", "t", "x"), child(code), notify=lambda r: done.set())
+        send = runs.GeckitSend(Assignment("note_task", "t", "x"), child(code), INSTALL, notify=lambda r: done.set())
         self.assertTrue(done.wait(20))
         self.assertEqual(send.answer, runs.GeckitAnswer("queued", "g7"))
         self.assertEqual(send.error, "")
-        bad = runs.GeckitSend(Assignment("note_task", "t", "x"), child("import sys; sys.stderr.write('GeckIt is not running'); sys.exit(1)"))
+        bad = runs.GeckitSend(Assignment("note_task", "t", "x"), child("import sys; sys.stderr.write('GeckIt is not running'); sys.exit(1)"), INSTALL)
         wait(bad)
         self.assertEqual((bad.answer.state, bad.error), ("error", "GeckIt is not running"))
-        missing = runs.GeckitSend(Assignment("note_task", "t", "x"), ["no-such-program-xyz-" + "q" * 8])
+        missing = runs.GeckitSend(Assignment("note_task", "t", "x"), ["no-such-program-xyz-" + "q" * 8], INSTALL)
         self.assertEqual(missing.answer.state, "error")
+
+    def test_send_runs_with_the_geckit_environment(self):
+        """Run as Node (never GeckIt's window), on its data folder, without provider keys."""
+        code = ("import json, os; print(json.dumps({'tasks': [{'answer': 'queued', 'id': ' '.join("
+                "[os.environ.get('ELECTRON_RUN_AS_NODE', '-'), os.environ.get('GECKIT_DATA', '-'), "
+                "os.environ.get('OPENAI_API_KEY', '-')])}]}))")
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "parent-only"}):
+            send = runs.GeckitSend(Assignment("note_task", "t", "x"), child(code), INSTALL)
+        wait(send)
+        self.assertEqual(send.answer, runs.GeckitAnswer("queued", "1 D:/data/geckit -"))
 
 
 if __name__ == "__main__":

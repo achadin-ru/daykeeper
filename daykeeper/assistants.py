@@ -39,7 +39,7 @@ from pathlib import Path
 from .i18n import _
 from .settings import private
 
-KINDS = ("mr_review", "mr_fix", "note_task", "mr_brief", "call_digest", "custom")
+KINDS = ("mr_review", "mr_fix", "note_task", "mr_brief", "custom")
 CHANNELS = ("terminal", "geckit", "quiet")
 AGENT_IDS = ("claude", "codex")
 AGENT_NAMES = {"claude": "Claude Code", "codex": "Codex"}
@@ -64,13 +64,26 @@ OFF_PLAN = (
     "AZURE_OPENAI_API_KEY",
 )
 
-_ID_RE = re.compile(r"^[0-9a-z]{6,32}$")
+_ID_RE = re.compile(r"[0-9a-z]{6,32}")  # fullmatch only: `$` would let a trailing newline through
 _PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
 # In the launcher batch file the folder stands inside quotes, where only a quote or a line
 # break breaks it; the assignment path stands between `\"` that cmd reads as the end and
 # the start of a quoted part, so cmd's operators are refused there too. `%` is doubled.
 _CMD_UNSAFE_FOLDER = set('"\r\n')
 _CMD_UNSAFE_PATH = set('"&|<>^\r\n')
+# The launcher's own path is the whole `cmd /k` line: list2cmdline quotes it when it holds a
+# space, and cmd keeps those quotes only when nothing special stands between them.
+_CMD_UNSAFE_SCRIPT = _CMD_UNSAFE_PATH | set("()@%")
+
+# The GeckIt channel is not offered yet; its code below stays, tested with a stand-in. Two
+# things in GeckIt itself stand in the way:
+# - `geckit start` accepts a request only from a Claude Code or Codex session GeckIt lists
+#   (CODEX_THREAD_ID / CLAUDE_CODE_SESSION_ID naming a conversation on its board). Daykeeper
+#   is not such a session, and faking those variables is not an option;
+# - on Windows GeckIt's control socket is a plain file path, which Node cannot listen on
+#   (it needs a named pipe there), so nothing would answer the request at all.
+# Turn it on once GeckIt accepts requests from outside a session and listens on Windows.
+GECKIT_CHANNEL_READY = False
 
 
 def _new_id() -> str:
@@ -203,14 +216,6 @@ PRESETS: tuple[Template, ...] = (
         "Summarize this merge request in one paragraph: what changes, what to look at first, risks. Diff follows.",
         channel="quiet", agent="claude", preset=True,
     ),
-    Template(
-        "call_digest", "call_digest", "Digest of a call",
-        "From this call transcript extract: a 3-5 sentence summary, decisions, notes, and tasks "
-        "(who, what, due when if said). Answer with JSON only:\n"
-        '{"summary": "...", "notes": ["..."], "tasks": [{"text": "...", "owner": "...", "due": "..."}]}\n\n'
-        "Transcript:\n{transcript}",
-        channel="quiet", agent="claude", preset=True,
-    ),
 )
 PRESET_IDS = tuple(t.id for t in PRESETS)
 
@@ -226,7 +231,7 @@ def _template_from(item: Mapping) -> Template | None:
     tid = text("id").strip()
     kind, channel, agent = text("kind"), text("channel"), text("agent")
     return Template(
-        id=tid if _ID_RE.match(tid) else _new_id(),
+        id=tid if _ID_RE.fullmatch(tid) else _new_id(),
         kind=kind if kind in KINDS else "custom",
         title=title,
         body=body,
@@ -387,7 +392,7 @@ def assignment_file(data_dir: Path, a: Assignment) -> Path:
     app's other private files, and return the path."""
     from .vault import write_private  # the vault module pulls in the crypto: only when a file is written
 
-    if not _ID_RE.match(a.id):
+    if not _ID_RE.fullmatch(a.id):
         raise ValueError(f"not an assignment id: {a.id!r}")
     folder = assignments_dir(data_dir)
     if not folder.exists():
@@ -404,7 +409,7 @@ def prune_assignments(data_dir: Path, days: int = KEEP_DAYS, now: float | None =
     limit = (time.time() if now is None else now) - days * 86400
     gone = 0
     for path in folder.glob("*") if folder.is_dir() else []:
-        if path.suffix not in (".md", ".cmd") or not _ID_RE.match(path.stem):
+        if path.suffix not in (".md", ".cmd") or not _ID_RE.fullmatch(path.stem):
             continue
         try:
             if path.stat().st_mtime < limit:
@@ -458,29 +463,50 @@ def _batch_text(value: str) -> str:
     return value.replace("%", "%%")
 
 
+def _batch_cd(folder: str) -> str:
+    """The launcher's step into the project folder, stopping it when that fails (the
+    assistant would otherwise start among the assignment files). `pushd` for a network
+    path: `cd` cannot make one current. Quoted text keeps `)` and `&` from cmd's block."""
+    step = "pushd" if folder.startswith(("\\\\", "//")) else "cd /d"
+    quoted = f'"{_batch_text(folder)}"'
+    message = _batch_text(_("Could not open the project folder:"))
+    return f"{step} {quoted} || (echo {message} {quoted} & pause & exit /b 1)"
+
+
 def terminal_plan(a: Assignment, path: Path | str, agent: str = "", platform: str = sys.platform,
-                  environ: Mapping[str, str] = os.environ, home: str = "") -> ConsolePlan:
+                  environ: Mapping[str, str] = os.environ, home: str = "",
+                  exists: Callable[[str], bool] = os.path.isdir) -> ConsolePlan:
     """The assistant in a console window, in the project folder, told to read the
-    assignment file. The variables of OFF_PLAN present in `environ` are cleared for it."""
+    assignment file. The variables of OFF_PLAN present in `environ` are cleared for it.
+    Refused (`problem`) for an unknown assistant or a project folder that is not there."""
     agent = agent or a.agent or "claude"
+    if agent not in AGENT_IDS:
+        return ConsolePlan(problem=_("Not a known assistant: {name}").format(name=agent))
     line = launch_line(a, path)
     folder = a.folder or home or str(Path.home())
+    if not exists(folder):
+        return ConsolePlan(problem=_("The project folder is not there: {path}").format(path=folder))
     off = off_plan_names(environ)
     if platform == "win32":
-        bad = folder if set(folder) & _CMD_UNSAFE_FOLDER else str(path) if set(str(path)) & _CMD_UNSAFE_PATH else ""
+        script_path = Path(path).with_suffix(".cmd")
+        bad = next((p for p, unsafe in ((folder, _CMD_UNSAFE_FOLDER), (str(path), _CMD_UNSAFE_PATH),
+                                        (str(script_path), _CMD_UNSAFE_SCRIPT)) if set(p) & unsafe), "")
         if bad:
             return ConsolePlan(problem=_("The folder has characters the console cannot pass: {path}").format(path=bad))
-        script_path = Path(path).with_suffix(".cmd")
         lines = ["@echo off", "chcp 65001 >nul"]  # the file is UTF-8: a folder in Cyrillic reads right
         lines += [f'set "{name}="' for name in off]
-        lines += [f'cd /d "{_batch_text(folder)}"', _batch_text(subprocess.list2cmdline([agent, line]))]
+        lines += [_batch_cd(folder), _batch_text(subprocess.list2cmdline([agent, line]))]
+        # The full path, not the bare name: with NoDefaultCurrentDirectoryInExePath set cmd
+        # does not look in the current folder. No quotes of our own — open_in_console passes
+        # the line through list2cmdline, which adds them when the path has a space and would
+        # turn ours into `\"` that cmd does not read back.
         return ConsolePlan(
-            shell=script_path.name, cwd=str(script_path.parent),
+            shell=str(script_path), cwd=str(script_path.parent),
             script="\r\n".join(lines) + "\r\n", script_path=str(script_path),
         )
     argv = [agent, line]
     prefix = ["env"] + [x for name in off for x in ("-u", name)] if off else []
-    return ConsolePlan(argv=argv, shell=shlex.join(prefix + argv), cwd=folder)
+    return ConsolePlan(argv=argv, shell=f"cd {shlex.quote(folder)} || exit 1; " + shlex.join(prefix + argv), cwd=folder)
 
 
 def write_script(plan: ConsolePlan) -> None:
@@ -536,6 +562,12 @@ class GeckitInstall:
     exe: str  # GeckIt's program
     cli: str  # its command-line script inside the app bundle
     data: str  # its data folder, GECKIT_DATA
+
+
+def geckit_available(install: GeckitInstall | None) -> bool:
+    """Whether the GeckIt channel is offered: GeckIt is installed and the channel is ready
+    (`GECKIT_CHANNEL_READY` — it is not yet, see there)."""
+    return GECKIT_CHANNEL_READY and install is not None
 
 
 def geckit_install(environ: Mapping[str, str] = os.environ, exists: Callable[[str], bool] = os.path.isfile,
