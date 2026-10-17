@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -84,23 +85,44 @@ class ClipHistory:
     """The recorded texts, newest first."""
 
     items: list[ClipItem] = field(default_factory=list)
+    # (sealed bytes of the newest item, SHA-256 of its text): lets `add` spot a repeat
+    # without opening the newest item. Memory only, never stored; it counts only while
+    # that item is still the newest, so a removal or a fresh load falls back to opening.
+    _last: tuple[bytes, bytes] | None = field(default=None, repr=False, compare=False)
 
     def add(self, text: str, sealer: SealerLike | None, now: float, limit: int = DEFAULT_LIMIT) -> bool:
         """Record `text` at the top. False — nothing recorded: empty, longer than
         MAX_CHARS, the same as the newest item, or the vault is locked (the sealer is
         missing, zeroed or refuses). Over `limit` the oldest unpinned items go; pinned
-        ones, and the text just taken, stay even past it."""
+        ones, and the text just taken, stay even past it.
+
+        Token-looking text is NOT filtered here: skipping it (`looks_secret`) is the
+        caller's rule, applied before the call."""
         if sealer is None or not usable(sealer) or not text or not text.strip() or len(text) > MAX_CHARS:
             return False
-        if self.items and self.items[0].text(sealer) == text:
+        digest = hashlib.sha256(text.encode("utf-8")).digest()
+        if self.items and self._is_newest(text, digest, sealer):
             return False
         try:
             sealed = sealer.seal(text)
         except (ValueError, RuntimeError):
             return False
         self.items.insert(0, ClipItem(float(now), sealed))
+        self._last = (sealed, digest)
         self._trim(limit)
         return True
+
+    def _is_newest(self, text: str, digest: bytes, sealer: SealerLike) -> bool:
+        """Is `text` the newest item: by the remembered digest when it still belongs to
+        the newest item, else (just loaded, the newest removed) by opening it once."""
+        newest = self.items[0]
+        if self._last is not None and self._last[0] is newest.sealed:
+            return self._last[1] == digest
+        shown = newest.text(sealer)
+        if not shown:
+            return False  # does not open with this key: compare again next time
+        self._last = (newest.sealed, hashlib.sha256(shown.encode("utf-8")).digest())
+        return self._last[1] == digest
 
     def _trim(self, limit: int) -> None:
         limit = max(1, int(limit))

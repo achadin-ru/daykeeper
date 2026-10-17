@@ -20,6 +20,18 @@ class RefusingSealer:
         raise RuntimeError("locked")
 
 
+class CountingSealer(Sealer):
+    """A real sealer that counts how often a sealed item is opened."""
+
+    def __init__(self):
+        super().__init__()
+        self.opens = 0
+
+    def open(self, blob):
+        self.opens += 1
+        return super().open(blob)
+
+
 class ClipHistoryTest(unittest.TestCase):
     def setUp(self):
         self.sealer = Sealer()
@@ -34,6 +46,32 @@ class ClipHistoryTest(unittest.TestCase):
         self.assertTrue(self.history.add("two", self.sealer, 3.0, 20))
         self.assertTrue(self.history.add("one", self.sealer, 4.0, 20), "not the newest any more")
         self.assertEqual(self.texts(), ["one", "two", "one"])
+
+    def test_repeated_adds_do_not_open_the_newest_item(self):
+        sealer = CountingSealer()
+        self.history.add("one", sealer, 1.0, 20)
+        for i in range(5):
+            self.assertFalse(self.history.add("one", sealer, 2.0 + i, 20))
+        self.assertTrue(self.history.add("two", sealer, 8.0, 20))
+        self.assertFalse(self.history.add("two", sealer, 9.0, 20))
+        self.assertEqual(sealer.opens, 0, "the repeat is spotted by the in-memory digest")
+
+    def test_a_loaded_history_opens_the_newest_once_then_uses_the_digest(self):
+        sealer = CountingSealer()
+        self.history.add("one", sealer, 1.0, 20)
+        loaded = ClipHistory.from_list(self.history.to_list())
+        self.assertNotIn("_last", repr(loaded.to_list()), "the digest is never stored")
+        self.assertFalse(loaded.add("one", sealer, 2.0, 20))
+        self.assertFalse(loaded.add("one", sealer, 3.0, 20))
+        self.assertEqual(sealer.opens, 1)
+
+    def test_removing_the_newest_falls_back_to_opening(self):
+        self.history.add("a", self.sealer, 1.0, 20)
+        self.history.add("b", self.sealer, 2.0, 20)
+        self.history.remove(0)
+        self.assertFalse(self.history.add("a", self.sealer, 3.0, 20), "a is the newest again")
+        self.assertTrue(self.history.add("b", self.sealer, 4.0, 20))
+        self.assertEqual(self.texts(), ["b", "a"])
 
     def test_the_limit_drops_the_oldest_unpinned_and_keeps_pinned(self):
         for i in range(3):
